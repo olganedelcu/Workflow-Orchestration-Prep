@@ -19,6 +19,7 @@
     <a href="topic-6.html">Branching</a>
     <a href="topic-7.html" class="active">Proposals</a>
     <a href="topic-8.html">Observability</a>
+    <a href="topic-9.html">HTTP &amp; Comms</a>
   </div>
 </nav>
 
@@ -143,6 +144,72 @@ Error categories:
     <div class="answer">"I'd define a standard step interface — a shared contract that every service must follow. Request: workflow ID, step ID, inputs. Response: status, outputs, structured error. The contract lives in a shared package in the monorepo. This means the orchestrator doesn't need service-specific code. The retry logic, timeout handling, and data passing are all generic. If a new service doesn't follow the contract, it's a conversation, not a code change in the orchestrator."</div>
     <div class="answer-es">"Definiria una interfaz estandar — un contrato compartido en el monorepo. El orquestador no necesita codigo especifico por servicio. Si un nuevo servicio no sigue el contrato, es una conversacion, no un cambio de codigo."</div>
   </div>
+
+  <!-- ============ SDK & API PROPOSALS ============ -->
+  <h2>SDK &amp; API Integration Proposals</h2>
+
+  <p>The platform provides SDKs (iOS, Android, Web) that customers integrate. Here's how the orchestrator fits:</p>
+  <p class="es">La plataforma provee SDKs (iOS, Android, Web) que los clientes integran. Asi encaja el orquestador:</p>
+
+<pre><code>Customer integrates SDK into their app
+         |
+         v
+SDK captures document + selfie on user's device
+         |
+         v
+SDK calls: POST /verifications
+  {
+    customer_id: "revolut-prod",
+    signer: { country: "DE" },
+    document_type: "passport",
+    images: {
+      doc_front: "s3://...",
+      doc_back: "s3://...",
+      selfie: "s3://..."
+    },
+    callback_url: "https://customer.com/webhook"
+  }
+         |
+         v
+Orchestrator creates workflow, runs DAG
+         |
+         v
+When done: POST callback_url with result
+  {
+    verification_id: "abc-123",
+    verdict: "APPROVED",
+    extracted_data: { name, dob, doc_number },
+    details: { ocr_confidence, face_match_score, ... }
+  }</code></pre>
+
+  <h3>API design proposals for the team</h3>
+
+  <table>
+    <tr><th>Endpoint</th><th>Method</th><th>Purpose / Proposito</th></tr>
+    <tr><td><code>/verifications</code></td><td>POST</td><td>Start a new verification workflow</td></tr>
+    <tr><td><code>/verifications/:id</code></td><td>GET</td><td>Check status + results</td></tr>
+    <tr><td><code>/verifications/:id/cancel</code></td><td>POST</td><td>Cancel a running verification</td></tr>
+    <tr><td><code>/verifications/:id/events</code></td><td>GET (SSE)</td><td>Real-time progress stream for the SDK</td></tr>
+    <tr><td><code>/workflow-definitions</code></td><td>GET/POST</td><td>Manage workflow templates (internal)</td></tr>
+  </table>
+
+  <div class="callout">
+    <div class="label">SDK proposal / Propuesta para el SDK</div>
+    <p>The SDK should handle: image capture, compression, upload to object storage, and then call the orchestrator API with image URIs. The SDK should NOT send raw image bytes in the API call — upload first, then pass references.</p>
+    <p class="es">El SDK debe manejar: captura de imagen, compresion, subida a object storage, y luego llamar a la API del orquestador con URIs. El SDK NO debe enviar bytes de imagen en la llamada API — subir primero, luego pasar referencias.</p>
+  </div>
+
+  <h3>Compliance requirements for the API</h3>
+  <ul>
+    <li><strong>All data stays in EU</strong> — object storage and database must be in EU regions (eIDAS 2.0, AMLR)
+      <br><em>Todos los datos se quedan en la UE — almacenamiento en regiones de la UE</em></li>
+    <li><strong>Every API call is logged</strong> — who called what, when, with what result (audit trail)
+      <br><em>Cada llamada a la API se registra — quien llamo que, cuando, con que resultado</em></li>
+    <li><strong>Data retention policies</strong> — verification data must be kept for X years, then deleted (GDPR)
+      <br><em>Politicas de retencion — datos de verificacion se guardan X anos, luego se borran</em></li>
+    <li><strong>Authentication</strong> — every customer has API keys; every internal service uses service-to-service auth
+      <br><em>Autenticacion — cada cliente tiene API keys; cada servicio interno usa auth servicio-a-servicio</em></li>
+  </ul>
 
   <a href="topic-8.html" class="back-top">Next: Observability &rarr;</a>
 

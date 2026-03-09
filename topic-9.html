@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 9: HTTP &amp; Communication Patterns — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+    <a href="topic-9.html" class="active">HTTP &amp; Comms</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 9: HTTP &amp; Communication Patterns</h1>
+  <p class="subtitle">HTTP y Patrones de Comunicacion &bull; <span class="tag tag-med">Medium</span></p>
+
+  <!-- ============ HTTP BASICS ============ -->
+  <h2>What is HTTP? / Que es HTTP?</h2>
+
+  <p>HTTP is the <strong>language that computers use to talk to each other over the internet</strong>. When your browser opens a page, it uses HTTP. When your orchestrator calls the OCR service, it uses HTTP too.</p>
+  <p class="es">HTTP es el idioma que usan las computadoras para hablar entre si por internet.</p>
+
+  <!-- ============ HTTP METHODS ============ -->
+  <h2>HTTP Methods — The Verbs / Los verbos</h2>
+
+  <p>Think of them as <strong>actions</strong> — what you want to do:</p>
+
+  <table>
+    <tr><th>Method</th><th>What it does</th><th>Analogy</th><th>In our system</th></tr>
+    <tr><td><strong>GET</strong></td><td>Read/fetch data</td><td>"Show me the menu"</td><td><code>GET /workflows/abc-123</code></td></tr>
+    <tr><td><strong>POST</strong></td><td>Create/send something new</td><td>"I want to order this"</td><td><code>POST /verifications</code></td></tr>
+    <tr><td><strong>PUT</strong></td><td>Replace entirely</td><td>"Replace my whole order"</td><td>Update a workflow definition</td></tr>
+    <tr><td><strong>PATCH</strong></td><td>Update partially</td><td>"Change just the drink"</td><td>Update one field</td></tr>
+    <tr><td><strong>DELETE</strong></td><td>Remove something</td><td>"Cancel my order"</td><td>Cancel a verification</td></tr>
+  </table>
+
+  <div class="callout">
+    <div class="label">Rule of thumb / Regla general</div>
+    <p>Reading something? &rarr; <strong>GET</strong>. Sending data to create or process? &rarr; <strong>POST</strong>. All step calls are POST because we SEND data to be processed.</p>
+    <p class="es">Leyendo algo? GET. Enviando datos para crear o procesar? POST. Todas las llamadas a pasos son POST porque ENVIAMOS datos para procesar.</p>
+  </div>
+
+  <!-- ============ FULL REQUEST ============ -->
+  <h2>Anatomy of an HTTP Call / Anatomia de una llamada HTTP</h2>
+
+<pre><code>REQUEST (what you send):
+┌──────────────────────────────────────────┐
+│  POST /execute HTTP/1.1                  │  &lt;-- method + path
+│  Host: ocr-service.internal              │  &lt;-- where to send it
+│  Content-Type: application/json          │  &lt;-- "I'm sending JSON"
+│  Authorization: Bearer eyJhbGc...        │  &lt;-- who am I (auth token)
+│                                          │
+│  {                                       │  &lt;-- the body (the data)
+│    "workflow_id": "abc-123",             │
+│    "inputs": {                           │
+│      "document_image": "s3://doc.jpg"    │
+│    }                                     │
+│  }                                       │
+└──────────────────────────────────────────┘
+                    |
+                    v
+             (network / red)
+                    |
+                    v
+RESPONSE (what you get back):
+┌──────────────────────────────────────────┐
+│  HTTP/1.1 200 OK                         │  &lt;-- status code
+│  Content-Type: application/json          │
+│                                          │
+│  {                                       │  &lt;-- the body (result)
+│    "status": "completed",                │
+│    "outputs": {                          │
+│      "name": "Jane Doe",                │
+│      "confidence": 0.97                  │
+│    }                                     │
+│  }                                       │
+└──────────────────────────────────────────┘</code></pre>
+
+  <!-- ============ STATUS CODES ============ -->
+  <h2>Status Codes / Codigos de estado</h2>
+
+<pre><code>2xx = SUCCESS (todo bien)
+  200 OK              &rarr; here's your data
+  201 Created         &rarr; I created the thing you asked
+  202 Accepted        &rarr; got it, working on it (async)
+
+4xx = CLIENT ERROR (tu culpa)
+  400 Bad Request     &rarr; you sent bad data
+  401 Unauthorized    &rarr; who are you?
+  404 Not Found       &rarr; doesn't exist
+  429 Too Many Requests &rarr; slow down! (rate limit)
+
+5xx = SERVER ERROR (culpa del servidor)
+  500 Internal Error  &rarr; something broke
+  502 Bad Gateway     &rarr; service behind me is down
+  503 Unavailable     &rarr; I'm overloaded, try later</code></pre>
+
+  <div class="callout warn">
+    <div class="label">For the orchestrator</div>
+    <p><strong>4xx</strong> &rarr; permanent failure, don't retry (bad input). <strong>429, 5xx</strong> &rarr; transient failure, retry with backoff.</p>
+    <p class="es">4xx &rarr; fallo permanente, no reintentar. 429, 5xx &rarr; fallo transitorio, reintentar con backoff.</p>
+  </div>
+
+  <!-- ============ TIMEOUT ============ -->
+  <h2>What is a Timeout? / Que es un Timeout?</h2>
+
+  <p>A timeout is a <strong>maximum wait time</strong>. "I'll wait 10 seconds for your answer. If you don't respond, I give up."</p>
+  <p class="es">Un timeout es un tiempo maximo de espera. "Espero 10 segundos tu respuesta. Si no respondes, me rindo."</p>
+
+<pre><code>WITHOUT timeout (dangerous):
+  Orchestrator &rarr; calls OCR service
+  Orchestrator waits...
+  Orchestrator waits...
+  Orchestrator waits... forever??
+  (If the service is dead, you wait FOREVER)
+
+WITH timeout (safe):
+  Orchestrator &rarr; calls OCR service
+  Orchestrator waits...
+  10 seconds pass... no response
+  Orchestrator: "Time's up. I'll retry or fail."
+  (You always get an answer within a known time)</code></pre>
+
+  <p><strong>Analogy:</strong> You order food at a restaurant. Without timeout: you sit forever. With timeout: "If my food isn't here in 30 min, I'm leaving."</p>
+  <p class="es">Analogia: Pides comida. Sin timeout: esperas para siempre. Con timeout: "Si no llega en 30 min, me voy."</p>
+
+  <h3>Timeouts per step in our system</h3>
+  <table>
+    <tr><th>Step</th><th>Timeout</th><th>Why</th></tr>
+    <tr><td>OCR</td><td>15s</td><td>Image processing can be slow</td></tr>
+    <tr><td>Liveness</td><td>10s</td><td>Biometric analysis</td></tr>
+    <tr><td>Face Match</td><td>20s</td><td>Comparing two images</td></tr>
+    <tr><td>Sanctions</td><td>30s</td><td>External API, variable latency</td></tr>
+  </table>
+
+  <!-- ============ QUERY PARAMS ============ -->
+  <h2>Querying — Getting Only What You Need</h2>
+
+  <h3>Query Parameters (simplest way to filter)</h3>
+
+<pre><code>GET /verifications?status=pending
+  &rarr; only return pending verifications
+
+GET /verifications?status=completed&amp;country=DE
+  &rarr; completed verifications from Germany
+
+GET /verifications/abc-123?fields=status,verdict
+  &rarr; only return status and verdict, not everything</code></pre>
+
+  <h3>REST vs GraphQL</h3>
+
+<pre><code>REST (server decides what to return):
+  GET /verifications/abc-123
+  Response: { id, status, verdict, created_at, updated_at,
+              steps: [...everything...], customer: {...},
+              signer: {...}, documents: [...] }
+  &rarr; returns EVERYTHING even if you only need status
+
+GraphQL (YOU decide what to return):
+  POST /graphql
+  { query: "{ verification(id: \"abc-123\") { status verdict } }" }
+  Response: { status: "COMPLETED", verdict: "APPROVED" }
+  &rarr; returns ONLY what you asked for</code></pre>
+
+  <div class="callout success">
+    <div class="label">For this system: REST is enough</div>
+    <p>The API surface is small — a few endpoints with predictable shapes. GraphQL adds complexity (schema management, resolvers, caching challenges) without solving a real problem. REST with query parameters for filtering covers the use case.</p>
+    <p class="es">La superficie de API es pequena — pocos endpoints con formas predecibles. GraphQL agrega complejidad sin resolver un problema real. REST con parametros de consulta cubre el caso de uso.</p>
+  </div>
+
+  <!-- ============ REAL-TIME PATTERNS ============ -->
+  <h2>Real-Time Communication Patterns</h2>
+  <p>Different ways to get <strong>live updates</strong>:</p>
+
+  <h3>1. Polling (simplest)</h3>
+  <p>Client asks "are you done yet?" over and over.</p>
+  <p class="es">El cliente pregunta "ya terminaste?" una y otra vez.</p>
+
+<pre><code>Client                          Server
+  |── GET /status ──────────────&rarr;|
+  |&larr;── { status: "running" } ───|
+  |   (wait 2 seconds)           |
+  |── GET /status ──────────────&rarr;|
+  |&larr;── { status: "running" } ───|
+  |   (wait 2 seconds)           |
+  |── GET /status ──────────────&rarr;|
+  |&larr;── { status: "completed" } ─|   done!
+
+Analogy: Calling the restaurant every 2 min
+         "Is my food ready?" "No." "Ready?" "Yes!"</code></pre>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Dead simple, works everywhere</td><td>Wastes network calls, delay between updates</td></tr>
+  </table>
+
+  <h3>2. Long Polling (smarter)</h3>
+  <p>Client asks, server <strong>holds the connection open</strong> until there's news.</p>
+  <p class="es">El cliente pregunta, el servidor mantiene la conexion abierta hasta que hay noticias.</p>
+
+<pre><code>Client                          Server
+  |── GET /status ──────────────&rarr;|
+  |         (server holds...)    |
+  |         (something happens!) |
+  |&larr;── { status: "completed" } ─|   immediate!
+  |── GET /status ──────────────&rarr;|   (new request for next update)
+
+Analogy: Call restaurant, they say
+         "Stay on the line, I'll tell you when it's ready"</code></pre>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Fewer requests, near real-time</td><td>Server holds connections, timeout needed</td></tr>
+  </table>
+
+  <h3>3. Server-Sent Events / SSE (one-way stream)</h3>
+  <p>Server pushes updates to the client. Client just listens.</p>
+  <p class="es">El servidor empuja actualizaciones. El cliente solo escucha.</p>
+
+<pre><code>Client                          Server
+  |── GET /events (keep open) ──&rarr;|
+  |&larr;── data: step "ocr" started  |
+  |&larr;── data: step "ocr" completed|
+  |&larr;── data: step "face_match"...|
+  |&larr;── data: verdict "APPROVED"  |
+  Connection stays open, server keeps pushing
+
+Analogy: A radio — you tune in and listen</code></pre>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Real-time, built into browsers, simple HTTP</td><td>One direction only (server &rarr; client)</td></tr>
+  </table>
+
+  <h3>4. WebSockets (two-way real-time)</h3>
+  <p>A persistent connection where both sides can send anytime.</p>
+  <p class="es">Una conexion persistente donde ambos lados pueden enviar en cualquier momento.</p>
+
+<pre><code>Client                          Server
+  |── HTTP upgrade to WebSocket ─&rarr;|
+  |&larr;── Connection established ───|
+  |&larr;── { step: "ocr", "started" }|
+  |── { action: "cancel" } ─────&rarr;|    client can send too!
+  |&larr;── { workflow: "cancelled" } |
+
+Analogy: A phone call — both people can talk anytime</code></pre>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>True real-time, both directions, low latency</td><td>Most complex, needs special server, harder to scale</td></tr>
+  </table>
+
+  <!-- ============ WHICH TO USE ============ -->
+  <h2>Which Pattern for Our System?</h2>
+
+  <table>
+    <tr><th>Communication</th><th>Best Pattern</th><th>Why</th></tr>
+    <tr>
+      <td>Customer backend &larr;&rarr; Platform</td>
+      <td><strong>Webhook/callback</strong></td>
+      <td>Platform calls customer's URL when done. Simple, reliable.</td>
+    </tr>
+    <tr>
+      <td>End user app &larr;&rarr; Platform</td>
+      <td><strong>SSE</strong></td>
+      <td>User watches progress: "Checking..." &rarr; "Approved!" One direction enough.</td>
+    </tr>
+    <tr>
+      <td>Video-assisted session</td>
+      <td><strong>WebSockets</strong></td>
+      <td>User and agent interact in real-time. Two-way needed.</td>
+    </tr>
+    <tr>
+      <td>Orchestrator &rarr; Services</td>
+      <td><strong>REST request/response</strong></td>
+      <td>Orchestrator calls, waits, gets result. No real-time needed.</td>
+    </tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">Summary / Resumen</div>
+    <p>Everything in this system is <strong>REST</strong> except: SSE for user-facing live progress, and WebSockets only if there's a real-time video session. Don't over-engineer.</p>
+    <p class="es">Todo en este sistema es REST excepto: SSE para progreso en vivo al usuario, y WebSockets solo si hay sesion de video en tiempo real. No sobre-ingenieries.</p>
+  </div>
+
+  <div class="qa">
+    <div class="question">"How would the end user see the progress of their verification?"</div>
+    <div class="answer">"SSE — Server-Sent Events. The mobile SDK opens an SSE connection when the user starts verification. The orchestrator pushes events as each step completes: 'Analyzing document...', 'Checking identity...', 'Approved!'. It's one-directional, built into browsers, and simpler than WebSockets. We'd only need WebSockets for a video-assisted flow where the user and agent interact in real-time."</div>
+    <div class="answer-es">"SSE — Server-Sent Events. El SDK abre una conexion SSE cuando el usuario inicia la verificacion. El orquestador empuja eventos cuando cada paso completa. Es unidireccional, integrado en browsers, y mas simple que WebSockets. Solo necesitariamos WebSockets para un flujo de video donde usuario y agente interactuan en tiempo real."</div>
+  </div>
+
+  <a href="index.html" class="back-top">&larr; Back to Home</a>
+
+</div>
+</body>
+</html>

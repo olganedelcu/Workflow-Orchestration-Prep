@@ -19,12 +19,13 @@
     <a href="topic-6.html">Branching</a>
     <a href="topic-7.html">Proposals</a>
     <a href="topic-8.html">Observability</a>
+    <a href="topic-9.html">HTTP &amp; Comms</a>
   </div>
 </nav>
 
 <div class="container">
 
-  <h1>IDnow System Design Interview Prep</h1>
+  <h1>System Design Interview Prep</h1>
   <p class="subtitle">Orchestration Engine &rarr; Full Identity Verification Product</p>
 
   <!-- ============ WHAT YOU BUILT ============ -->
@@ -44,32 +45,32 @@
   <h2>What They Want / Lo que quieren</h2>
 
   <p>Take that basic engine and design a <strong>full product</strong> for identity verification.</p>
-  <p class="es">Tu motor basico sabe ejecutar pasos en orden. Ahora: como lo conviertes en un sistema real que verifica la identidad de una persona (como cuando abres una cuenta en Revolut)?</p>
+  <p class="es">Tu motor basico sabe ejecutar pasos en orden. Ahora: como lo conviertes en un sistema real que verifica la identidad de una persona (como cuando abres una cuenta en a bank)?</p>
 
   <!-- ============ THREE ACTORS ============ -->
   <h2>The Three Actors / Los tres actores</h2>
 
-<pre><code>SIGNER              CUSTOMER              IDnow
+<pre><code>SIGNER              CUSTOMER              PLATFORM
 (end user)          (business)            (your system)
 Persona que         Empresa que           La plataforma
 quiere verificar    necesita verificar    que orquesta
 su identidad        al usuario            todo el proceso
 
 Example/Ejemplo:
-Una persona          Revolut               IDnow
-abriendo una                               coordina OCR,
-cuenta bancaria                            face match, etc.</code></pre>
+A person opening     A bank or            Your platform
+a bank account       fintech company      coordinates OCR,
+                                          face match, etc.</code></pre>
 
   <div class="callout">
     <div class="label">Key Insight / Punto clave</div>
-    <p>IDnow sits in the <strong>MIDDLE</strong>. Customers call your API, your orchestrator coordinates external services, and returns results to the customer.</p>
-    <p class="es">IDnow esta EN EL MEDIO. Los clientes llaman tu API, tu orquestador coordina servicios externos, y devuelve resultados al cliente.</p>
+    <p>Your platform sits in the <strong>MIDDLE</strong>. Customers call your API, your orchestrator coordinates external services, and returns results to the customer.</p>
+    <p class="es">Tu plataforma esta EN EL MEDIO. Los clientes llaman tu API, tu orquestador coordina servicios externos, y devuelve resultados al cliente.</p>
   </div>
 
   <!-- ============ VERIFICATION FLOW ============ -->
   <h2>The Verification Flow / El flujo de verificacion</h2>
 
-<pre><code>Customer (Revolut) calls IDnow API
+<pre><code>Customer (e.g. a bank) calls your API
          |
          v
    [Create Workflow Instance]
@@ -167,6 +168,12 @@ Clock tick 2:  Decision                 (espera TODOS los anteriores)</code></pr
       <div class="title-es">Observabilidad</div>
       <span class="tag tag-low">Lower</span>
     </a>
+    <a href="topic-9.html" class="topic-card">
+      <div class="number">Topic 9</div>
+      <div class="title">HTTP &amp; Communication Patterns</div>
+      <div class="title-es">HTTP y patrones de comunicacion</div>
+      <span class="tag tag-med">Medium</span>
+    </a>
   </div>
 
   <!-- ============ WHITEBOARD PLAN ============ -->
@@ -185,8 +192,8 @@ Clock tick 2:  Decision                 (espera TODOS los anteriores)</code></pr
     </div>
     <div class="timeline-item">
       <div class="time">Min 10–15</div>
-      <div class="desc">Zoom into IDnow box &rarr; draw the DAG</div>
-      <div class="desc-es">Acercarse a la caja de IDnow &rarr; dibujar el DAG</div>
+      <div class="desc">Zoom into the platform box &rarr; draw the DAG</div>
+      <div class="desc-es">Acercarse a la caja de the platform &rarr; dibujar el DAG</div>
     </div>
     <div class="timeline-item">
       <div class="time">Min 15–25</div>
@@ -279,31 +286,93 @@ Diamond 2: Face Match + Sanctions → Decision
       <p class="es">Datos de AMBAS ramas alimentan el punto de union</p></li>
   </ol>
 
-  <!-- ============ IDNOW CONTEXT ============ -->
-  <h2>What IDnow Does / Que hace IDnow</h2>
+  <!-- ============ PLATFORM CONTEXT ============ -->
+  <h2>Identity Verification Platform / Plataforma de verificacion</h2>
 
-  <p>IDnow is an identity verification platform based in Munich, Germany. They provide:</p>
-  <p class="es">IDnow es una plataforma de verificacion de identidad con base en Munich, Alemania.</p>
+  <p>A modern identity verification platform typically provides:</p>
+  <p class="es">Una plataforma moderna de verificacion de identidad tipicamente provee:</p>
 
   <ul>
-    <li><strong>AutoIdent</strong> — fully automated identity verification (no humans)
-      <br><em>Verificacion completamente automatizada (sin humanos)</em></li>
-    <li><strong>VideoIdent</strong> — video call with a trained agent who verifies your ID live
+    <li><strong>Automated verification</strong> — fully automated, AI-driven identity checks (no humans)
+      <br><em>Verificacion automatizada con IA (sin humanos)</em></li>
+    <li><strong>Video-assisted verification</strong> — video call with a trained agent who verifies your ID live
       <br><em>Videollamada con un agente entrenado que verifica tu ID en vivo</em></li>
-    <li><strong>eSign / InstantSign</strong> — electronic document signing with identity check
+    <li><strong>eSign</strong> — electronic document signing with identity check
       <br><em>Firma electronica de documentos con verificacion de identidad</em></li>
-    <li><strong>eID</strong> — verification using the chip in European ID cards
-      <br><em>Verificacion usando el chip en tarjetas de identidad europeas</em></li>
+    <li><strong>eID</strong> — verification using the chip in electronic ID cards
+      <br><em>Verificacion usando el chip en tarjetas de identidad electronicas</em></li>
   </ul>
 
-  <p><strong>Their customers:</strong> Banks (Revolut, N26), insurance companies, telecoms, crypto exchanges — anyone who needs KYC (Know Your Customer).</p>
-  <p class="es">Sus clientes: Bancos, aseguradoras, telecomunicaciones, exchanges de crypto — cualquiera que necesite KYC.</p>
+  <p><strong>Typical customers:</strong> Banks, fintechs, insurance companies, telecoms, crypto exchanges — anyone who needs KYC (Know Your Customer).</p>
+  <p class="es">Clientes tipicos: Bancos, fintechs, aseguradoras, telecoms, exchanges de crypto — cualquiera que necesite KYC.</p>
+
+  <!-- ============ TECH STACK ============ -->
+  <h2>Tech Stack for an Identity Verification Platform</h2>
+
+  <table>
+    <tr><th>Layer / Capa</th><th>Technology / Tecnologia</th><th>What it means for you / Que significa para ti</th></tr>
+    <tr>
+      <td><strong>Core AI/ML</strong></td>
+      <td>Machine learning for fraud detection, biometric auth, document verification</td>
+      <td>These are the external services your orchestrator calls. You DON'T build them — you coordinate them.</td>
+    </tr>
+    <tr>
+      <td><strong>APIs</strong></td>
+      <td>REST APIs (extensive)</td>
+      <td>REST is the standard. No GraphQL needed. Your orchestrator exposes REST and calls REST.</td>
+    </tr>
+    <tr>
+      <td><strong>SDKs</strong></td>
+      <td>Web SDKs, native mobile SDKs (iOS &amp; Android)</td>
+      <td>SDKs wrap REST calls. The SDK captures documents/selfies and sends them to your API.</td>
+    </tr>
+    <tr>
+      <td><strong>Infrastructure</strong></td>
+      <td>Cloud-native, EU-based data centers (Germany)</td>
+      <td>Data never leaves the EU. This affects storage choices (must be EU region).</td>
+    </tr>
+    <tr>
+      <td><strong>Security</strong></td>
+      <td>eIDAS 2.0, AMLR, ETSI standards, PAD, IAD</td>
+      <td>Every step must be auditable. Presentation attack detection (PAD) = detecting fake IDs/photos. Injection attack detection (IAD) = detecting manipulated video feeds.</td>
+    </tr>
+  </table>
 
   <div class="callout warn">
-    <div class="label">Regulatory context</div>
-    <p>European Anti-Money Laundering (AML) directives require identity verification. <strong>AUDIT TRAILS are not optional — they're legally required.</strong></p>
-    <p class="es">Las directivas europeas contra el lavado de dinero (AML) requieren verificacion de identidad. Las PISTAS DE AUDITORIA no son opcionales — son legalmente requeridas.</p>
+    <div class="label">Regulatory context / Contexto regulatorio</div>
+    <p><strong>eIDAS 2.0</strong> — EU regulation for electronic identification. <strong>AMLR</strong> — Anti-Money Laundering Regulation. <strong>ETSI</strong> — European standards for telecom &amp; security. These mean: <strong>AUDIT TRAILS are not optional — they're legally required.</strong></p>
+    <p class="es">eIDAS 2.0, AMLR, ETSI — regulaciones europeas. Las PISTAS DE AUDITORIA no son opcionales — son legalmente requeridas.</p>
   </div>
+
+  <div class="callout">
+    <div class="label">Security terms to know / Terminos de seguridad</div>
+    <ul>
+      <li><strong>PAD</strong> (Presentation Attack Detection) — detecting when someone holds up a photo of a photo, a printed face, or a mask instead of their real face.
+        <br><em>Detectar cuando alguien presenta una foto de una foto, una cara impresa, o una mascara.</em></li>
+      <li><strong>IAD</strong> (Injection Attack Detection) — detecting when someone injects a fake video feed (deepfake) into the camera stream instead of a real camera.
+        <br><em>Detectar cuando alguien inyecta un video falso (deepfake) en el stream de la camara.</em></li>
+    </ul>
+  </div>
+
+  <h3>How this maps to your orchestrator / Como se mapea a tu orquestador</h3>
+
+<pre><code>Mobile SDK (iOS/Android)          Your Orchestrator              AI/ML Services
+  |                                    |                              |
+  | User captures doc + selfie         |                              |
+  |── REST: POST /verifications ──────>|                              |
+  |                                    |── REST: POST /ocr ──────────>| Document AI
+  |                                    |── REST: POST /liveness ─────>| Biometric AI (PAD)
+  |                                    |── REST: POST /face-match ───>| Biometric AI
+  |                                    |── REST: POST /sanctions ────>| Compliance DB
+  |                                    |                              |
+  |                                    |  Decision (internal logic)   |
+  |                                    |                              |
+  |<── REST: webhook/SSE result ───────|                              |
+  |                                    |                              |
+  | "You're verified!"                 |  Audit trail saved to DB     |
+
+Everything is REST. Cloud-native. EU data centers.
+Todo es REST. Cloud-native. Data centers en la UE.</code></pre>
 
   <!-- ============ SENIOR EXPECTATIONS ============ -->
   <h2>Senior Engineer Expectations / Expectativas para senior</h2>

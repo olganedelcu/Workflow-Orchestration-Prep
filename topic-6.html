@@ -19,6 +19,7 @@
     <a href="topic-6.html" class="active">Branching</a>
     <a href="topic-7.html">Proposals</a>
     <a href="topic-8.html">Observability</a>
+    <a href="topic-9.html">HTTP &amp; Comms</a>
   </div>
 </nav>
 
@@ -32,7 +33,7 @@
   <p>Your current engine has a <strong>FIXED</strong> DAG — every step always runs (unless a dependency fails). In reality, verification flows need to take <strong>DIFFERENT PATHS</strong> based on results.</p>
   <p class="es">Tu motor actual tiene un DAG FIJO. En realidad, los flujos necesitan tomar CAMINOS DIFERENTES basados en resultados.</p>
 
-  <p>Remember the IDnow InstantSign diagram:</p>
+  <p>Remember the InstantSign diagram:</p>
 
 <pre><code>Check ID validity
        |
@@ -118,7 +119,7 @@ With branching: WAITING → RUNNING → COMPLETED
                                   → FAILED
                 WAITING → SKIPPED  (condition was false)</code></pre>
 
-  <h2>Real IDnow Example</h2>
+  <h2>Real-World Example</h2>
 
   <p>Different countries require different verification methods:</p>
 

@@ -19,6 +19,7 @@
     <a href="topic-6.html">Branching</a>
     <a href="topic-7.html">Proposals</a>
     <a href="topic-8.html">Observability</a>
+    <a href="topic-9.html">HTTP &amp; Comms</a>
   </div>
 </nav>
 
@@ -138,6 +139,40 @@
     <div class="answer">"I'd use sync HTTP with a generous timeout — say 15 seconds for OCR. The orchestrator already runs independent steps in parallel, so while OCR is slow, Liveness runs at the same time. If OCR consistently exceeds the timeout, I'd add retry logic for that specific step. If the problem persists, that's when I'd consider moving OCR to async with a callback, but only for that one service."</div>
     <div class="answer-es">"Usaria HTTP sincrono con un timeout generoso — digamos 15 segundos para OCR. El orquestador ya ejecuta pasos independientes en paralelo. Si OCR consistentemente excede el timeout, agregaria logica de reintento. Si persiste, ahi consideraria mover OCR a asincrono, pero solo ese servicio."</div>
   </div>
+
+  <!-- ============ REAL TECH STACK CONTEXT ============ -->
+  <h2>Real Stack Context / Contexto del stack real</h2>
+
+  <p>The platform uses a cloud-native, REST-based architecture:</p>
+
+  <table>
+    <tr><th>Component</th><th>Communication</th><th>Why</th></tr>
+    <tr><td>Mobile SDK (iOS/Android) &rarr; Platform</td><td><strong>REST API</strong></td><td>SDK captures documents + selfie, sends via POST</td></tr>
+    <tr><td>Web SDK &rarr; Platform</td><td><strong>REST API</strong></td><td>Same flow, browser-based</td></tr>
+    <tr><td>Orchestrator &rarr; AI/ML services</td><td><strong>REST API</strong> (internal)</td><td>OCR, liveness (PAD), face match — all ML models behind REST</td></tr>
+    <tr><td>Orchestrator &rarr; Compliance</td><td><strong>REST API</strong></td><td>Sanctions check, PEP screening</td></tr>
+    <tr><td>Platform &rarr; Customer backend</td><td><strong>Webhook (REST callback)</strong></td><td>Notify customer when verification completes</td></tr>
+    <tr><td>Platform &rarr; User app</td><td><strong>SSE</strong> (optional)</td><td>Real-time progress: "Checking..." &rarr; "Approved!"</td></tr>
+  </table>
+
+  <div class="callout">
+    <div class="label">Key point / Punto clave</div>
+    <p><strong>Everything is REST.</strong> The AI/ML services (document verification, biometric auth, fraud detection) are internal services behind REST endpoints. Your orchestrator calls them via POST, gets results back. Cloud-native, EU data centers.</p>
+    <p class="es"><strong>Todo es REST.</strong> Los servicios de IA/ML son servicios internos detras de endpoints REST. Tu orquestador los llama via POST, recibe resultados. Cloud-native, data centers en la UE.</p>
+  </div>
+
+  <h3>Security services the orchestrator coordinates</h3>
+
+  <table>
+    <tr><th>Service</th><th>What it does</th><th>Tech behind it</th></tr>
+    <tr><td>Document verification</td><td>OCR + authenticity check</td><td>AI/ML model</td></tr>
+    <tr><td>Liveness + PAD</td><td>Is this a real person? Not a photo of a photo?</td><td>Biometric AI + Presentation Attack Detection</td></tr>
+    <tr><td>Face matching</td><td>Does the selfie match the document photo?</td><td>Biometric AI</td></tr>
+    <tr><td>IAD</td><td>Is the video feed real? Not a deepfake injection?</td><td>Injection Attack Detection</td></tr>
+    <tr><td>Sanctions/PEP</td><td>Is this person on a sanctions or politically exposed list?</td><td>Compliance database lookups</td></tr>
+  </table>
+
+  <p class="es">PAD = detectar fotos de fotos, mascaras. IAD = detectar deepfakes inyectados en el stream de video. Ambos son servicios que tu orquestador coordina.</p>
 
   <a href="topic-3.html" class="back-top">Next: The Decision Step &rarr;</a>
 
