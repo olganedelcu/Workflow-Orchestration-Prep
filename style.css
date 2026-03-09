@@ -30,10 +30,15 @@ body {
 }
 
 /* ---- Layout ---- */
+html, body {
+  min-height: 100vh;
+}
+
 .container {
-  max-width: 860px;
+  width: 100%;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  padding: 2rem 3rem 4rem;
 }
 
 /* ---- Navigation ---- */
@@ -47,9 +52,10 @@ body {
   margin-bottom: 2rem;
 }
 .nav-inner {
-  max-width: 860px;
+  width: 100%;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 3rem;
   display: flex;
   align-items: center;
   gap: 1.5rem;
@@ -324,8 +330,9 @@ td { background: var(--bg); }
 
 /* ---- Responsive ---- */
 @media (max-width: 600px) {
+  .container { padding: 1.5rem 1rem 3rem; }
+  .nav-inner { gap: 1rem; padding: 0 1rem; }
   .topic-grid { grid-template-columns: 1fr; }
   h1 { font-size: 1.6rem; }
   pre { font-size: 0.78rem; padding: 0.8rem; }
-  .nav-inner { gap: 1rem; }
 }

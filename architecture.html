@@ -336,272 +336,330 @@
     <p class="es">Cada servicio sigue la MISMA interfaz. El orquestador envia POST /execute y recibe {status, outputs, error}. Sin codigo especial por servicio.</p>
   </div>
 
-  <!-- ============ SEQUENCE DIAGRAM ============ -->
-  <h2>Full Sequence Diagram / Diagrama de secuencia completo</h2>
+  <!-- ============ GENERAL SEQUENCE DIAGRAM ============ -->
+  <h2>General Sequence Diagram / Diagrama de secuencia general</h2>
 
-  <p>Like a UML sequence diagram — every actor is a column, arrows show who talks to whom, and you can see exactly WHEN and WHERE data gets stored.</p>
-  <p class="es">Como un diagrama de secuencia UML — cada actor es una columna, las flechas muestran quien habla con quien, y ves exactamente CUANDO y DONDE se guardan los datos.</p>
+  <p>This is the <strong>general</strong> architecture — it doesn't matter if the client is a mobile app, a web app, or a backend server. Any customer sends a verification request, the platform processes it.</p>
+  <p class="es">Esta es la arquitectura <strong>general</strong> — no importa si el cliente es una app movil, una web, o un servidor backend. Cualquier cliente envia una solicitud de verificacion, la plataforma la procesa.</p>
 
   <div class="callout warn">
-    <div class="label">This is the key diagram / Este es el diagrama clave</div>
-    <p>This is what you'd draw on a whiteboard to show the full system flow. It answers: "where do files live?", "when do we hit the database?", and "what calls what?"</p>
-    <p class="es">Esto es lo que dibujarias en la pizarra. Responde: "donde viven los archivos?", "cuando tocamos la base de datos?", y "quien llama a quien?"</p>
+    <div class="label">Draw this on the whiteboard / Dibuja esto en la pizarra</div>
+    <p>5 actors: Customer, API, Orchestrator, PostgreSQL, S3. Plus the external services below. This shows the complete data flow — what goes where and when.</p>
+    <p class="es">5 actores: Cliente, API, Orquestador, PostgreSQL, S3. Mas los servicios externos. Esto muestra el flujo completo — que va donde y cuando.</p>
   </div>
 
-<pre><code>  SDK/App        API Gateway     Orchestrator     PostgreSQL    S3 (Object     OCR        Liveness    Face Match   Sanctions
-  (user's        (REST API)      (DAG Engine)     (state +      Storage)       Service    + PAD       Service      + PEP
-   device)                                         audit)       (images)
-    │                │                │                │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │  ══════════════════════ PHASE 1: CAPTURE + UPLOAD ══════════════════════════════════════════════════════════════ │
-    │                │                │                │             │             │           │           │           │
-    │  User captures │                │                │             │             │           │           │           │
-    │  document +    │                │                │             │             │           │           │           │
-    │  selfie        │                │                │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │── PUT doc_front.jpg ──────────────────────────────────────────▶│             │           │           │           │
-    │◀── 200 OK {uri: "s3://bucket/doc-front.jpg"} ─────────────────│             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │── PUT selfie.jpg ─────────────────────────────────────────────▶│             │           │           │           │
-    │◀── 200 OK {uri: "s3://bucket/selfie.jpg"} ────────────────────│             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │  Images now    │                │                │             │             │           │           │           │
-    │  live in S3    │                │                │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │  ════════════════════ PHASE 2: START VERIFICATION ════════════════════════════════════════════════════════════── │
-    │                │                │                │             │             │           │           │           │
-    │── POST /verifications ────────▶│                │             │             │           │           │           │
-    │   {country:"DE",               │                │             │             │           │           │           │
-    │    doc_type:"passport",        │                │             │             │           │           │           │
-    │    images:{doc:"s3://...",      │                │             │             │           │           │           │
-    │            selfie:"s3://..."},  │                │             │             │           │           │           │
-    │    callback_url:"https://..."}─▶│                │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │── Validate + authenticate ─────▶│             │             │           │           │           │
-    │                │   (API key check)               │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │── Create workflow ──────────────▶│             │             │           │           │           │
-    │                │   {country, type, image_uris}   │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │  Select DAG    │             │             │           │           │           │
-    │                │                │  (DE+passport  │             │             │           │           │           │
-    │                │                │   → standard   │             │             │           │           │           │
-    │                │                │     flow)      │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── INSERT ──────▶│             │             │           │           │           │
-    │                │                │   workflow_     │             │             │           │           │           │
-    │                │                │   instances     │             │             │           │           │           │
-    │                │                │   {id, status:  │             │             │           │           │           │
-    │                │                │    "RUNNING",   │             │             │           │           │           │
-    │                │                │    context}     │             │             │           │           │           │
-    │                │                │◀── OK ──────────│             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── INSERT ──────▶│             │             │           │           │           │
-    │                │                │   workflow_     │             │             │           │           │           │
-    │                │                │   events       │             │             │           │           │           │
-    │                │                │   {WORKFLOW_    │             │             │           │           │           │
-    │                │                │    CREATED}     │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │◀── 202 Accepted ───────────────│                │             │             │           │           │           │
-    │   {verification_id: "abc-123"} │                │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │── GET /verifications/abc-123/events (SSE) ─────▶│             │             │           │           │           │
-    │   (keep connection open for progress)           │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │  ═══════════════════════════ PHASE 3: CLOCK TICK 0 (parallel) ════════════════════════════════════════════════  │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── POST /execute ────────────────────────────────────▶│           │           │
-    │                │                │   {workflow_id:"abc-123",                            │           │           │
-    │                │                │    step_id:"ocr",                                    │           │           │
-    │                │                │    inputs:{doc_image:"s3://bucket/doc-front.jpg"}}   │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── POST /execute ──────────────────────────────────────────────▶│           │
-    │                │                │   {workflow_id:"abc-123",                                      │           │
-    │                │                │    step_id:"liveness",                                         │           │
-    │                │                │    inputs:{selfie:"s3://bucket/selfie.jpg"}}                   │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │                │             │  OCR reads   │           │           │           │
-    │                │                │                │             │  image from  │           │           │           │
-    │                │                │                │             │◀─ GET ───────│           │           │           │
-    │                │                │                │             │── image ────▶│           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │                │             │  OCR saves   │           │           │           │
-    │                │                │                │             │  face crop   │           │           │           │
-    │                │                │                │             │◀─ PUT ───────│           │           │           │
-    │                │                │                │             │  face.jpg    │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │                │             │  Liveness    │           │           │
-    │                │                │                │             │  reads video │           │           │
-    │                │                │                │             │◀─ GET ────────────────────│           │           │
-    │                │                │                │             │── video ─────────────────▶│           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │                │             │  Liveness    │           │           │           │
-    │                │                │                │             │  saves best  │           │           │           │
-    │                │                │                │             │  frame       │           │           │           │
-    │                │                │                │             │◀─ PUT ────────────────────│           │           │
-    │                │                │                │             │  frame.jpg   │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │◀── {status:"completed", ────────────────────│           │           │           │
-    │                │                │     outputs:{name:"Jane Doe",              │           │           │           │
-    │                │                │      DOB:"1990-01-01",                     │           │           │           │
-    │                │                │      confidence:0.97,                      │           │           │           │
-    │                │                │      face_crop:"s3://bucket/face.jpg"}} ───│           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │◀── {status:"completed", ───────────────────────────────│           │           │
-    │                │                │     outputs:{alive:true,                               │           │           │
-    │                │                │      confidence:0.95,                                  │           │           │
-    │                │                │      best_frame:"s3://bucket/frame.jpg"}} ─────────────│           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── UPDATE ──────▶│             │             │           │           │           │
-    │                │                │   step_executions             │             │           │           │           │
-    │                │                │   ocr: COMPLETED│             │             │           │           │           │
-    │                │                │   liveness:     │             │             │           │           │           │
-    │                │                │    COMPLETED    │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── INSERT ──────▶│             │             │           │           │           │
-    │                │                │   workflow_events             │             │           │           │           │
-    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
-    │                │                │    step:"ocr", clock:0}      │             │           │           │           │
-    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
-    │                │                │    step:"liveness",clock:0}  │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │◀── SSE: {"step":"ocr","status":"completed"} ────│             │             │           │           │           │
-    │◀── SSE: {"step":"liveness","status":"completed"}│             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │  ═══════════════════════════ PHASE 4: CLOCK TICK 1 (parallel) ════════════════════════════════════════════════  │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── POST /execute ──────────────────────────────────────────────────▶│           │
-    │                │                │   {step_id:"face_match",                                          │           │
-    │                │                │    inputs:{face_crop:"s3://bucket/face.jpg",                      │           │
-    │                │                │            best_frame:"s3://bucket/frame.jpg"}}                   │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── POST /execute ──────────────────────────────────────────────────────────────▶│
-    │                │                │   {step_id:"sanctions",                                                       │
-    │                │                │    inputs:{name:"Jane Doe",                                                   │
-    │                │                │            DOB:"1990-01-01",                                                  │
-    │                │                │            nationality:"DE"}}                                                 │
-    │                │                │                │             │             │           │           │           │
-    │                │                │                │             │  Face Match  │           │           │           │
-    │                │                │                │             │  reads both  │           │           │           │
-    │                │                │                │             │  images      │           │           │           │
-    │                │                │                │             │◀─ GET ────────────────────────────────│           │
-    │                │                │                │             │── images ────────────────────────────▶│           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │◀── {status:"completed", ────────────────────────────────────────────│           │
-    │                │                │     outputs:{match_score:0.94}} ────────────────────────────────────│           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │◀── {status:"completed", ────────────────────────────────────────────────────────│
-    │                │                │     outputs:{hit:false,                                                         │
-    │                │                │      requires_manual_review:false}} ────────────────────────────────────────────│
-    │                │                │                │             │             │           │           │           │
-    │                │                │── UPDATE ──────▶│             │             │           │           │           │
-    │                │                │   step_executions             │             │           │           │           │
-    │                │                │   face_match:   │             │             │           │           │           │
-    │                │                │    COMPLETED    │             │             │           │           │           │
-    │                │                │   sanctions:    │             │             │           │           │           │
-    │                │                │    COMPLETED    │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── INSERT ──────▶│             │             │           │           │           │
-    │                │                │   workflow_events             │             │           │           │           │
-    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
-    │                │                │    step:"face_match",        │             │           │           │           │
-    │                │                │    clock:1}                  │             │           │           │           │
-    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
-    │                │                │    step:"sanctions",         │             │           │           │           │
-    │                │                │    clock:1}                  │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │  ═══════════════════════════ PHASE 5: CLOCK TICK 2 (decision) ════════════════════════════════════════════════  │
-    │                │                │                │             │             │           │           │           │
-    │                │                │  Decision Engine               │             │           │           │           │
-    │                │                │  (internal, no                │             │           │           │           │
-    │                │                │   external call):             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │  ocr.confidence: 0.97  ✓     │             │           │           │           │
-    │                │                │  liveness.alive: true   ✓    │             │           │           │           │
-    │                │                │  face_match: 0.94      ✓    │             │           │           │           │
-    │                │                │  sanctions.hit: false   ✓    │             │           │           │           │
-    │                │                │  → verdict: APPROVED         │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── UPDATE ──────▶│             │             │           │           │           │
-    │                │                │   workflow_     │             │             │           │           │           │
-    │                │                │   instances     │             │             │           │           │           │
-    │                │                │   status:       │             │             │           │           │           │
-    │                │                │   "COMPLETED"   │             │             │           │           │           │
-    │                │                │   verdict:      │             │             │           │           │           │
-    │                │                │   "APPROVED"    │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── INSERT ──────▶│             │             │           │           │           │
-    │                │                │   workflow_events             │             │           │           │           │
-    │                │                │   {WORKFLOW_    │             │             │           │           │           │
-    │                │                │    COMPLETED,   │             │             │           │           │           │
-    │                │                │    verdict:     │             │             │           │           │           │
-    │                │                │    "APPROVED"}  │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │  ═══════════════════════════ PHASE 6: NOTIFY ═════════════════════════════════════════════════════════════════  │
-    │                │                │                │             │             │           │           │           │
-    │◀── SSE: {"verdict":"APPROVED","details":{...}} ─│             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-    │                │                │── POST callback_url ──────────────────────────────────────────────────────────▶
-    │                │                │   {verification_id:"abc-123",                         Customer Backend
-    │                │                │    verdict:"APPROVED",
-    │                │                │    extracted_data:{name:"Jane Doe",DOB:"1990-01-01"},
-    │                │                │    details:{ocr_confidence:0.97,face_match:0.94}}
-    │                │                │                │             │             │           │           │           │
-    │                │                │                │             │             │           │           │           │
-  SDK/App        API Gateway     Orchestrator     PostgreSQL      S3            OCR        Liveness    Face Match   Sanctions
+<pre><code>  Customer        API Gateway     Orchestrator     PostgreSQL       S3 (Object       External
+  (any client)    (REST API)      (DAG Engine)     (state + audit)  Storage)         Services
+    │                │                │                │                │                │
+    │                │                │                │                │                │
+    │  ════════════ PHASE 1: VERIFICATION REQUEST ═══════════════════════════════════════
+    │                │                │                │                │                │
+    │── POST /verifications ────────▶│                │                │                │
+    │   {                            │                │                │                │
+    │     country: "DE",             │                │                │                │
+    │     doc_type: "passport",      │                │                │                │
+    │     images: {                  │                │                │                │
+    │       doc_front: "s3://...",   │                │                │                │
+    │       selfie: "s3://..."      │                │                │                │
+    │     },                         │                │                │                │
+    │     callback_url: "https://."  │                │                │                │
+    │   }                            │                │                │                │
+    │                │                │                │                │                │
+    │                │── Auth (API key) ──────────────▶│                │                │
+    │                │                │                │                │                │
+    │                │── Create workflow ─────────────▶│                │                │
+    │                │                │                │                │                │
+    │                │                │  Select DAG    │                │                │
+    │                │                │  based on      │                │                │
+    │                │                │  country + type│                │                │
+    │                │                │                │                │                │
+    │                │                │── INSERT ──────▶│                │                │
+    │                │                │   workflow_instances             │                │
+    │                │                │   {id:"abc-123",                │                │
+    │                │                │    status:"RUNNING",            │                │
+    │                │                │    context_data}                │                │
+    │                │                │                │                │                │
+    │                │                │── INSERT ──────▶│                │                │
+    │                │                │   workflow_events               │                │
+    │                │                │   {WORKFLOW_CREATED}            │                │
+    │                │                │                │                │                │
+    │◀── 202 Accepted ───────────────│                │                │                │
+    │   {verification_id: "abc-123"} │                │                │                │
+    │                │                │                │                │                │
+    │                │                │                │                │                │
+    │  ════════════ PHASE 2: ORCHESTRATION (clock tick 0) ═══════════════════════════════
+    │                │                │                │                │                │
+    │                │                │  OCR + Liveness have no deps   │                │
+    │                │                │  → run in PARALLEL              │                │
+    │                │                │                │                │                │
+    │                │                │── POST /execute (OCR) ──────────────────────────▶│
+    │                │                │   {workflow_id:"abc-123",                        │
+    │                │                │    step_id:"ocr",                                │
+    │                │                │    inputs:{                                      │
+    │                │                │      doc_image:"s3://bucket/doc.jpg"             │
+    │                │                │    }}                                            │
+    │                │                │                │                │                │
+    │                │                │── POST /execute (liveness) ─────────────────────▶│
+    │                │                │   {step_id:"liveness",                           │
+    │                │                │    inputs:{selfie:"s3://bucket/selfie.jpg"}}     │
+    │                │                │                │                │                │
+    │                │                │                │                │         ┌──────┤
+    │                │                │                │                │         │ OCR  │
+    │                │                │                │                │◀─ GET ──┤reads │
+    │                │                │                │                │─ img ──▶│image │
+    │                │                │                │                │         │      │
+    │                │                │                │                │◀─ PUT ──┤saves │
+    │                │                │                │                │ face    │face  │
+    │                │                │                │                │ crop    │crop  │
+    │                │                │                │                │         └──────┤
+    │                │                │                │                │                │
+    │                │                │◀── {status:"completed", ────────────────────────│
+    │                │                │     outputs:{name:"Jane Doe",                   │
+    │                │                │      confidence:0.97,                            │
+    │                │                │      face_crop:"s3://bucket/face.jpg"}}          │
+    │                │                │                │                │                │
+    │                │                │◀── {status:"completed", ────────────────────────│
+    │                │                │     outputs:{alive:true,                         │
+    │                │                │      best_frame:"s3://bucket/frame.jpg"}}        │
+    │                │                │                │                │                │
+    │                │                │── UPDATE ──────▶│                │                │
+    │                │                │   step_executions               │                │
+    │                │                │   ocr: COMPLETED                │                │
+    │                │                │   liveness: COMPLETED           │                │
+    │                │                │                │                │                │
+    │                │                │── INSERT ──────▶│                │                │
+    │                │                │   workflow_events               │                │
+    │                │                │   {STEP_COMPLETED, "ocr"}       │                │
+    │                │                │   {STEP_COMPLETED, "liveness"}  │                │
+    │                │                │                │                │                │
+    │                │                │                │                │                │
+    │  ════════════ PHASE 3: ORCHESTRATION (clock tick 1) ═══════════════════════════════
+    │                │                │                │                │                │
+    │                │                │  Face Match + Sanctions:        │                │
+    │                │                │  deps ready → PARALLEL          │                │
+    │                │                │                │                │                │
+    │                │                │── POST /execute (face_match) ───────────────────▶│
+    │                │                │   {inputs:{                                      │
+    │                │                │     face_crop:"s3://bucket/face.jpg",            │
+    │                │                │     best_frame:"s3://bucket/frame.jpg"           │
+    │                │                │   }}                                             │
+    │                │                │                │                │                │
+    │                │                │── POST /execute (sanctions) ────────────────────▶│
+    │                │                │   {inputs:{name:"Jane Doe",                      │
+    │                │                │     DOB:"1990-01-01", nationality:"DE"}}         │
+    │                │                │                │                │         ┌──────┤
+    │                │                │                │                │         │Face  │
+    │                │                │                │                │◀─ GET ──┤Match │
+    │                │                │                │                │─ imgs ─▶│reads │
+    │                │                │                │                │         │both  │
+    │                │                │                │                │         │images│
+    │                │                │                │                │         └──────┤
+    │                │                │                │                │                │
+    │                │                │◀── {match_score: 0.94} ────────────────────────│
+    │                │                │◀── {hit: false} ───────────────────────────────│
+    │                │                │                │                │                │
+    │                │                │── UPDATE ──────▶│                │                │
+    │                │                │   step_executions               │                │
+    │                │                │── INSERT ──────▶│                │                │
+    │                │                │   workflow_events               │                │
+    │                │                │                │                │                │
+    │                │                │                │                │                │
+    │  ════════════ PHASE 4: DECISION (clock tick 2) ════════════════════════════════════
+    │                │                │                │                │                │
+    │                │                │  Decision Engine                │                │
+    │                │                │  (INTERNAL - no external call)  │                │
+    │                │                │                │                │                │
+    │                │                │  Evaluate rules:                │                │
+    │                │                │  sanctions.hit: false       OK  │                │
+    │                │                │  liveness.alive: true       OK  │                │
+    │                │                │  face_match.score: 0.94    OK  │                │
+    │                │                │  ocr.confidence: 0.97      OK  │                │
+    │                │                │  → verdict: APPROVED            │                │
+    │                │                │                │                │                │
+    │                │                │── UPDATE ──────▶│                │                │
+    │                │                │   workflow_instances             │                │
+    │                │                │   status:"COMPLETED"            │                │
+    │                │                │   verdict:"APPROVED"            │                │
+    │                │                │                │                │                │
+    │                │                │── INSERT ──────▶│                │                │
+    │                │                │   workflow_events               │                │
+    │                │                │   {WORKFLOW_COMPLETED,          │                │
+    │                │                │    verdict:"APPROVED"}          │                │
+    │                │                │                │                │                │
+    │                │                │                │                │                │
+    │  ════════════ PHASE 5: RETURN RESULT ══════════════════════════════════════════════
+    │                │                │                │                │                │
+    │◀── POST callback_url ──────────│                │                │                │
+    │   {verification_id: "abc-123", │                │                │                │
+    │    verdict: "APPROVED",        │                │                │                │
+    │    extracted_data: {           │                │                │                │
+    │      name: "Jane Doe",        │                │                │                │
+    │      DOB: "1990-01-01"        │                │                │                │
+    │    },                          │                │                │                │
+    │    details: {                  │                │                │                │
+    │      ocr_confidence: 0.97,    │                │                │                │
+    │      face_match_score: 0.94   │                │                │                │
+    │    }}                          │                │                │                │
+    │                │                │                │                │                │
+  Customer        API Gateway     Orchestrator     PostgreSQL       S3              Services
 </code></pre>
 
-  <h3>Where data lives — summary / Donde viven los datos</h3>
+  <!-- ============ HOW IMAGES TRAVEL ============ -->
+  <h2>How Images Travel Through the Network</h2>
+  <p class="subtitle">Como viajan las imagenes por la red — this is critical to understand</p>
+
+  <p>Images (documents, selfies, video) are the <strong>heaviest data</strong> in the system. They NEVER travel through the orchestrator. Here's the key pattern:</p>
+  <p class="es">Las imagenes (documentos, selfies, video) son los datos MAS PESADOS del sistema. NUNCA pasan por el orquestador. Este es el patron clave:</p>
+
+<pre><code>THE WRONG WAY (what NOT to do):
+La forma incorrecta (lo que NO hacer):
+
+  Customer ──[5MB image bytes]──▶ API ──[5MB]──▶ Orchestrator ──[5MB]──▶ OCR Service
+                                                   BAD! The orchestrator
+                                                   becomes a bottleneck
+                                                   handling huge files
+
+THE RIGHT WAY (what we do):
+La forma correcta (lo que hacemos):
+
+  1. Images get uploaded to S3 FIRST (by whoever has them)
+     Las imagenes se suben a S3 PRIMERO (por quien las tenga)
+
+  2. Only URIs (small strings) travel through the orchestrator
+     Solo URIs (strings pequenos) viajan por el orquestador
+
+  3. Services read images directly from S3 when they need them
+     Los servicios leen imagenes directamente de S3 cuando las necesitan
+
+
+                         ┌─────────────────────────────────┐
+                         │           S3 (Object Storage)    │
+                         │                                  │
+                         │  doc-front.jpg   (uploaded by    │
+                         │  doc-back.jpg     client or SDK) │
+                         │  selfie.jpg                      │
+                         │  face-crop.jpg   (created by OCR)│
+                         │  best-frame.jpg  (created by     │
+                         │                   liveness)      │
+                         └──┬───────────┬───────────┬───────┘
+                            │           │           │
+                         GET image   GET image   GET images
+                            │           │           │
+                            ▼           ▼           ▼
+                          ┌───┐     ┌────────┐  ┌──────────┐
+                          │OCR│     │Liveness│  │Face Match│
+                          └─┬─┘     └───┬────┘  └──────────┘
+                            │           │
+                         PUT face    PUT best
+                         crop to S3  frame to S3
+
+
+  What travels through the orchestrator:
+  Lo que viaja por el orquestador:
+
+    "s3://bucket/doc-front.jpg"     ← just a string (50 bytes)
+    NOT the actual 5MB image file   ← NO el archivo de 5MB</code></pre>
+
+  <div class="callout success">
+    <div class="label">Why this matters / Por que importa</div>
+    <p><strong>The orchestrator is lightweight.</strong> It only passes small JSON payloads with URIs. The heavy image data flows directly between S3 and the services. This means the orchestrator can handle thousands of concurrent workflows without becoming a bottleneck.</p>
+    <p class="es"><strong>El orquestador es ligero.</strong> Solo pasa payloads JSON pequenos con URIs. Los datos pesados de imagenes fluyen directamente entre S3 y los servicios. El orquestador puede manejar miles de workflows sin ser un cuello de botella.</p>
+  </div>
+
+  <h3>Who uploads to S3? Depends on the client / Quien sube a S3? Depende del cliente</h3>
 
   <table>
-    <tr><th>What / Que</th><th>Where / Donde</th><th>Why / Por que</th></tr>
+    <tr><th>Client type / Tipo de cliente</th><th>Who uploads images / Quien sube imagenes</th><th>How / Como</th></tr>
     <tr>
-      <td><strong>Document images</strong> (front, back)</td>
-      <td>S3 Object Storage</td>
-      <td>Binary files, too large for DB. SDK uploads directly. Services read via URI.</td>
+      <td><strong>Mobile SDK</strong> (iOS/Android)</td>
+      <td>The SDK itself</td>
+      <td>SDK captures photo → compresses → uploads to S3 → sends URI to API</td>
     </tr>
     <tr>
-      <td><strong>Selfie / video</strong></td>
-      <td>S3 Object Storage</td>
-      <td>Same — binary media. Liveness service reads from S3.</td>
+      <td><strong>Web SDK</strong></td>
+      <td>The SDK (in-browser)</td>
+      <td>Same flow via WebRTC camera capture → upload → send URI</td>
     </tr>
     <tr>
-      <td><strong>Face crop</strong> (extracted by OCR)</td>
-      <td>S3 Object Storage</td>
-      <td>OCR service creates it, saves to S3, returns URI. Face Match reads it.</td>
+      <td><strong>Customer backend</strong></td>
+      <td>The customer's server</td>
+      <td>Customer already has the images → uploads to S3 (or pre-signed URL) → sends URI to API</td>
     </tr>
     <tr>
-      <td><strong>Best frame</strong> (from liveness)</td>
-      <td>S3 Object Storage</td>
-      <td>Liveness picks the best frame, saves to S3. Face Match reads it.</td>
+      <td><strong>OCR service</strong> (creates face crop)</td>
+      <td>The OCR service itself</td>
+      <td>OCR extracts face from document → saves face-crop.jpg to S3 → returns URI in output</td>
     </tr>
     <tr>
-      <td><strong>Workflow state</strong> (status, step results)</td>
-      <td>PostgreSQL</td>
-      <td>ACID transactions. Updated after each step. Enables crash recovery.</td>
-    </tr>
-    <tr>
-      <td><strong>Step outputs</strong> (name, DOB, scores)</td>
-      <td>PostgreSQL (JSONB)</td>
-      <td>Structured data, small. Stored as JSONB for flexibility.</td>
-    </tr>
-    <tr>
-      <td><strong>Audit events</strong></td>
-      <td>PostgreSQL (Event Log)</td>
-      <td>Append-only. Every state change. Legally required (eIDAS, AMLR).</td>
-    </tr>
-    <tr>
-      <td><strong>Final verdict</strong></td>
-      <td>PostgreSQL</td>
-      <td>APPROVED / REJECTED / MANUAL_REVIEW + reason. Queryable for analytics.</td>
+      <td><strong>Liveness service</strong> (creates best frame)</td>
+      <td>The liveness service</td>
+      <td>Picks best video frame → saves frame.jpg to S3 → returns URI in output</td>
     </tr>
   </table>
 
-  <div class="callout success">
-    <div class="label">The rule / La regla</div>
-    <p><strong>Binary files (images, video) → S3.</strong> <strong>Structured data (status, scores, decisions) → PostgreSQL.</strong> Steps never pass raw bytes — they pass S3 URIs. This keeps the orchestrator lightweight and the database small.</p>
-    <p class="es"><strong>Archivos binarios (imagenes, video) → S3.</strong> <strong>Datos estructurados (estado, puntajes, decisiones) → PostgreSQL.</strong> Los pasos nunca pasan bytes — pasan URIs de S3. Esto mantiene el orquestador ligero y la base de datos pequena.</p>
-  </div>
+  <p class="es">Cualquier actor que genere o tenga un archivo binario lo sube a S3 y pasa solo el URI. El orquestador nunca toca los archivos directamente.</p>
+
+  <!-- ============ WHERE DATA LIVES ============ -->
+  <h2>Where Data Lives / Donde viven los datos</h2>
+
+  <p>Two stores. Simple rule: <strong>binary files → S3, everything else → PostgreSQL.</strong></p>
+  <p class="es">Dos almacenes. Regla simple: <strong>archivos binarios → S3, todo lo demas → PostgreSQL.</strong></p>
+
+<pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│                        S3 OBJECT STORAGE                             │
+│                     (archivos binarios / binary files)               │
+│                                                                      │
+│  What lives here:                    Why here and not in the DB:     │
+│  • Document photos (front, back)     • Too large (1-10MB each)      │
+│  • Selfie photos                     • Not queryable — just stored   │
+│  • Video recordings                  • Services read directly by URI │
+│  • Face crop (extracted by OCR)      • Cheap storage at scale        │
+│  • Best frame (from liveness)        • Can use CDN for fast access   │
+│                                                                      │
+│  Organized as: s3://bucket/{workflow_id}/{step_id}/{filename}        │
+│  Example:      s3://bucket/abc-123/ocr/face-crop.jpg                 │
+│                                                                      │
+│  All buckets in EU region (eIDAS / GDPR)                             │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                          POSTGRESQL                                  │
+│                    (datos estructurados / structured data)            │
+│                                                                      │
+│  TABLE: workflow_instances                                            │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │ id (UUID) │ status    │ verdict  │ context_data │ created_at  │  │
+│  │ abc-123   │ COMPLETED │ APPROVED │ {inputs,     │ 2024-01-15  │  │
+│  │           │           │          │  outputs}    │  10:30:00   │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│  TABLE: step_executions                                              │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │ workflow_id │ step_id   │ status    │ outputs (JSONB)          │  │
+│  │ abc-123     │ ocr       │ COMPLETED │ {name:"Jane",conf:0.97, │  │
+│  │             │           │           │  face_crop:"s3://..."}   │  │
+│  │ abc-123     │ liveness  │ COMPLETED │ {alive:true,             │  │
+│  │             │           │           │  best_frame:"s3://..."}  │  │
+│  │ abc-123     │ face_match│ COMPLETED │ {match_score:0.94}       │  │
+│  │ abc-123     │ sanctions │ COMPLETED │ {hit:false}              │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│  TABLE: workflow_events (append-only audit log)                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │ workflow_id │ event_type       │ step_id  │ clock │ timestamp  │  │
+│  │ abc-123     │ WORKFLOW_CREATED │ null     │ 0     │ 10:30:00   │  │
+│  │ abc-123     │ STEP_COMPLETED   │ ocr      │ 0     │ 10:30:04   │  │
+│  │ abc-123     │ STEP_COMPLETED   │ liveness │ 0     │ 10:30:03   │  │
+│  │ abc-123     │ STEP_COMPLETED   │ face_m.  │ 1     │ 10:30:06   │  │
+│  │ abc-123     │ STEP_COMPLETED   │ sanctions│ 1     │ 10:30:07   │  │
+│  │ abc-123     │ WORKFLOW_COMPLETED│ null     │ 2     │ 10:30:07   │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│  Note: outputs JSONB contains S3 URIs — never the actual files.      │
+│  Nota: outputs JSONB contiene URIs de S3 — nunca los archivos.       │
+│                                                                      │
+│  All databases in EU region (eIDAS / GDPR)                           │
+└──────────────────────────────────────────────────────────────────────┘</code></pre>
 
   <div class="callout">
     <div class="label">When does the DB get written? / Cuando se escribe en la BD?</div>
@@ -611,7 +669,460 @@
       <li><strong>Decision made</strong> → UPDATE workflow_instances (verdict) + INSERT workflow_events</li>
       <li><strong>Each write is a transaction</strong> — never a half-written state</li>
     </ol>
-    <p class="es">1. Workflow creado → INSERT. 2. Despues de cada clock tick → UPDATE + INSERT eventos. 3. Decision tomada → UPDATE + INSERT. 4. Cada escritura es una transaccion.</p>
+    <p class="es">1. Workflow creado → INSERT. 2. Despues de cada clock tick → UPDATE + INSERT eventos. 3. Decision tomada → UPDATE + INSERT. 4. Cada escritura es una transaccion atomica.</p>
+  </div>
+
+  <!-- ============ MOBILE SDK SPECIFIC ============ -->
+  <h2>Mobile SDK Flow (specific case) / Flujo del SDK movil (caso especifico)</h2>
+
+  <p>The general architecture above works for ANY client. Here's what happens specifically when the client is a mobile SDK:</p>
+  <p class="es">La arquitectura general de arriba funciona para CUALQUIER cliente. Aqui lo que pasa especificamente cuando el cliente es un SDK movil:</p>
+
+<pre><code>  User's Phone          S3              API Gateway      Orchestrator
+  (SDK)                 (images)        (REST)           (DAG Engine)
+    │                      │                │                │
+    │  1. User opens app   │                │                │
+    │     SDK initializes  │                │                │
+    │                      │                │                │
+    │  2. SDK captures doc │                │                │
+    │     + selfie on      │                │                │
+    │     device camera    │                │                │
+    │                      │                │                │
+    │  3. SDK compresses   │                │                │
+    │     images           │                │                │
+    │                      │                │                │
+    │── 4. PUT images ────▶│                │                │
+    │   (upload directly   │                │                │
+    │    to S3, NOT to API)│                │                │
+    │◀── 200 {URIs} ──────│                │                │
+    │                      │                │                │
+    │── 5. POST /verifications ────────────▶│                │
+    │   {images: {URIs},                    │                │
+    │    country, doc_type,                 │                │
+    │    callback_url}                      │── create ─────▶│
+    │                      │                │   workflow      │
+    │◀── 202 {id} ─────────────────────────│                │
+    │                      │                │                │
+    │── 6. GET /events (SSE) ──────────────▶│                │
+    │   (keep open for     │                │   ... orchestration
+    │    live updates)     │                │   ... happens here
+    │                      │                │   ... (see general
+    │◀── SSE: "Analyzing doc..." ───────────│   ... diagram above)
+    │◀── SSE: "Checking identity..." ───────│                │
+    │◀── SSE: "Approved!" ─────────────────│                │
+    │                      │                │                │
+    │  7. SDK shows result │                │                │
+    │     to user          │                │                │
+    │                      │                │                │
+
+  KEY POINTS about the SDK:
+  PUNTOS CLAVE del SDK:
+
+  • SDK uploads images directly to S3 (step 4) — NOT through the API
+    SDK sube imagenes directo a S3 — NO a traves del API
+
+  • SDK sends only URIs to the API (step 5) — NOT image bytes
+    SDK envia solo URIs al API — NO bytes de imagen
+
+  • SDK uses SSE for real-time progress (step 6) — NOT polling
+    SDK usa SSE para progreso en tiempo real — NO polling
+
+  • The orchestration (OCR, liveness, face match, sanctions, decision)
+    is the SAME regardless of whether the client is an SDK or a backend
+    La orquestacion es la MISMA sin importar si el cliente es un SDK o un backend</code></pre>
+
+  <div class="callout success">
+    <div class="label">Why the SDK uploads to S3 directly / Por que el SDK sube a S3 directamente</div>
+    <p>If the SDK sent 5MB images through the API, the API server would need to handle all that binary data, forward it, and store it. Instead, the SDK gets a <strong>pre-signed URL</strong> from the API (a temporary URL that gives permission to upload to S3 directly). This way the API only handles small JSON requests — never image bytes.</p>
+    <p class="es">Si el SDK enviara imagenes de 5MB por el API, el servidor tendria que manejar esos datos binarios. En vez, el SDK recibe una <strong>URL pre-firmada</strong> del API (una URL temporal que da permiso para subir a S3 directamente). Asi el API solo maneja requests JSON pequenos — nunca bytes de imagen.</p>
+  </div>
+
+  <!-- ============ AUTH & SECURITY ============ -->
+  <h2>Authentication & Authorization / Autenticacion y autorizacion</h2>
+  <p class="subtitle">Who is allowed to do what, and how do we verify it</p>
+
+  <p>There are <strong>3 different auth scenarios</strong> in the system, each works differently:</p>
+  <p class="es">Hay <strong>3 escenarios de auth diferentes</strong> en el sistema, cada uno funciona diferente:</p>
+
+<pre><code>SCENARIO 1: Customer → Our API          (API Key + Bearer Token)
+SCENARIO 2: Our Orchestrator → Services  (Service-to-Service auth)
+SCENARIO 3: SDK → S3 upload              (Pre-signed URL)
+
+Each one explained below / Cada uno explicado abajo</code></pre>
+
+  <!-- SCENARIO 1 -->
+  <h3>Scenario 1: Customer authenticates with our API</h3>
+  <p class="es">Escenario 1: El cliente se autentica con nuestra API</p>
+
+  <p>When a customer (bank, fintech, etc.) wants to use our platform, we give them credentials. Here's how it works step by step:</p>
+  <p class="es">Cuando un cliente (banco, fintech, etc.) quiere usar nuestra plataforma, le damos credenciales. Asi funciona paso a paso:</p>
+
+<pre><code>STEP 1: ONBOARDING (one-time, when customer signs up)
+Paso 1: REGISTRO (una vez, cuando el cliente se registra)
+
+  We create an account for the customer in our system:
+  Creamos una cuenta para el cliente en nuestro sistema:
+
+  Customer record in our DB:
+  {
+    customer_id: "bank-prod",
+    name: "Deutsche Bank",
+    api_key: "dk_live_abc123...",        ← like a username
+    api_secret: "sk_live_xyz789...",     ← like a password (hashed in DB)
+    allowed_origins: ["https://bank.com"],
+    rate_limit: 1000,                    ← max requests per minute
+    webhook_url: "https://bank.com/verification-webhook",
+    created_at: "2024-01-01"
+  }
+
+  We give the customer their api_key + api_secret.
+  Le damos al cliente su api_key + api_secret.
+  They store it in THEIR backend server (never in frontend/SDK).
+  Lo guardan en SU servidor backend (nunca en frontend/SDK).
+
+
+STEP 2: GETTING A TOKEN (before each session)
+Paso 2: OBTENER UN TOKEN (antes de cada sesion)
+
+  Customer's backend server calls our auth endpoint:
+  El servidor del cliente llama a nuestro endpoint de auth:
+
+  POST /auth/token
+  Headers:
+    Authorization: Basic base64(api_key:api_secret)
+  Body:
+    { "grant_type": "client_credentials" }
+
+  Our API validates the credentials and returns a JWT token:
+  Nuestra API valida las credenciales y devuelve un JWT token:
+
+  Response:
+  {
+    "access_token": "eyJhbGciOiJSUzI1NiIs...",   ← JWT token
+    "token_type": "Bearer",
+    "expires_in": 3600,                             ← 1 hour
+    "scope": "verifications:create verifications:read"
+  }
+
+
+STEP 3: USING THE TOKEN (every API call)
+Paso 3: USAR EL TOKEN (cada llamada a la API)
+
+  Now every request includes the token in the Authorization header:
+  Ahora cada peticion incluye el token en el header Authorization:
+
+  POST /verifications
+  Headers:
+    Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+    Content-Type: application/json
+  Body:
+    {
+      country: "DE",
+      doc_type: "passport",
+      images: { doc_front: "s3://...", selfie: "s3://..." },
+      callback_url: "https://bank.com/webhook"
+    }
+
+  Our API Gateway:
+  Nuestro API Gateway:
+
+  1. Extracts the Bearer token from the header
+     Extrae el Bearer token del header
+
+  2. Validates the JWT signature (is it really from us?)
+     Valida la firma del JWT (es realmente de nosotros?)
+
+  3. Checks expiration (has the token expired?)
+     Comprueba expiracion (ha expirado el token?)
+
+  4. Extracts customer_id from the token claims
+     Extrae customer_id de los claims del token
+
+  5. Checks permissions (can this customer create verifications?)
+     Comprueba permisos (puede este cliente crear verificaciones?)
+
+  6. Applies rate limiting (has this customer exceeded their limit?)
+     Aplica rate limiting (ha excedido este cliente su limite?)
+
+  7. If all checks pass → forward to orchestrator
+     Si todo pasa → reenviar al orquestador</code></pre>
+
+  <div class="callout">
+    <div class="label">What is a JWT? / Que es un JWT?</div>
+    <p>A JWT (JSON Web Token) is a string that contains encoded information. It has 3 parts separated by dots:</p>
+    <p class="es">Un JWT es un string que contiene informacion codificada. Tiene 3 partes separadas por puntos:</p>
+<pre><code>eyJhbGciOiJSUzI1NiIs.eyJzdWIiOiJiYW5rLXByb2QiLC.SflKxwRJSMeKKF2QT4fw
+    ↑ HEADER              ↑ PAYLOAD                      ↑ SIGNATURE
+    (algorithm)           (data / claims)                 (proof it's real)
+
+The PAYLOAD contains:
+{
+  "sub": "bank-prod",              ← customer_id
+  "scope": "verifications:create", ← what they can do
+  "iat": 1705312800,               ← issued at (timestamp)
+  "exp": 1705316400                ← expires at (1 hour later)
+}
+
+The SIGNATURE is created with OUR private key.
+La FIRMA se crea con NUESTRA clave privada.
+
+Anyone can READ the payload, but only WE can CREATE valid tokens.
+Cualquiera puede LEER el payload, pero solo NOSOTROS podemos CREAR tokens validos.
+
+To verify: we check the signature with our public key.
+Para verificar: comprobamos la firma con nuestra clave publica.
+This is fast — no database call needed to validate a token.
+Es rapido — no necesitamos llamar a la BD para validar un token.</code></pre>
+  </div>
+
+  <div class="callout warn">
+    <div class="label">API Key vs Bearer Token — why both?</div>
+    <p><strong>API Key + Secret</strong> = long-lived credentials (like a username + password). Stored securely on the customer's server. Used ONLY to get tokens.</p>
+    <p><strong>Bearer Token (JWT)</strong> = short-lived (1 hour). Used for actual API calls. If stolen, it expires quickly. Can be validated without hitting the database.</p>
+    <p class="es"><strong>API Key + Secret</strong> = credenciales de larga duracion (como usuario + contrasena). Se guardan en el servidor del cliente. Solo se usan para obtener tokens.</p>
+    <p class="es"><strong>Bearer Token (JWT)</strong> = corta duracion (1 hora). Se usa para llamadas a la API. Si lo roban, expira rapido. Se valida sin tocar la base de datos.</p>
+  </div>
+
+  <!-- SCENARIO 2 -->
+  <h3>Scenario 2: Orchestrator authenticates with external services</h3>
+  <p class="es">Escenario 2: El orquestador se autentica con los servicios externos</p>
+
+  <p>The orchestrator calls internal services (OCR, liveness, etc). These are INTERNAL — not exposed to the internet. But we still need auth to prevent unauthorized calls.</p>
+  <p class="es">El orquestador llama servicios internos (OCR, liveness, etc). Son INTERNOS — no expuestos a internet. Pero aun necesitamos auth para prevenir llamadas no autorizadas.</p>
+
+<pre><code>SERVICE-TO-SERVICE AUTH (mTLS or internal JWT)
+AUTH SERVICIO-A-SERVICIO (mTLS o JWT interno)
+
+  Option A: Mutual TLS (mTLS) — both sides verify certificates
+  Opcion A: TLS Mutuo (mTLS) — ambos lados verifican certificados
+
+    Orchestrator has a certificate → proves "I am the orchestrator"
+    OCR service has a certificate → proves "I am the OCR service"
+    Both verify each other on every connection.
+    Ambos se verifican mutuamente en cada conexion.
+
+    Pros: Very secure, no tokens to manage
+    Cons: Certificate management is complex
+    Bueno: Muy seguro, sin tokens que gestionar
+    Malo: Gestionar certificados es complejo
+
+  Option B: Internal service JWT
+  Opcion B: JWT de servicio interno
+
+    POST /execute
+    Headers:
+      Authorization: Bearer eyJ...(internal-service-token)
+      X-Service-Name: workflow-orchestrator
+    Body:
+      { workflow_id, step_id, inputs }
+
+    The token identifies WHICH internal service is calling.
+    El token identifica CUAL servicio interno esta llamando.
+    Generated by a shared auth service or service mesh.
+    Generado por un servicio de auth compartido o service mesh.
+
+  FOR THE INTERVIEW: "I'd use whatever the company's service mesh provides —
+  likely mTLS between services in the same cluster. If not using a service mesh,
+  internal JWTs with short expiration."
+
+  PARA LA ENTREVISTA: "Usaria lo que provea el service mesh de la empresa —
+  probablemente mTLS entre servicios en el mismo cluster. Si no hay service mesh,
+  JWTs internos con expiracion corta."</code></pre>
+
+  <!-- SCENARIO 3 -->
+  <h3>Scenario 3: SDK uploads to S3 (pre-signed URLs)</h3>
+  <p class="es">Escenario 3: El SDK sube archivos a S3 (URLs pre-firmadas)</p>
+
+  <p>The SDK on the user's phone needs to upload images directly to S3. But S3 is private — you can't just upload to it. The solution: <strong>pre-signed URLs</strong>.</p>
+  <p class="es">El SDK en el telefono del usuario necesita subir imagenes directamente a S3. Pero S3 es privado — no puedes simplemente subir. La solucion: <strong>URLs pre-firmadas</strong>.</p>
+
+<pre><code>HOW PRE-SIGNED URLs WORK:
+COMO FUNCIONAN LAS URLs PRE-FIRMADAS:
+
+  SDK (phone)                     Our API                           S3
+    │                               │                               │
+    │                               │                               │
+    │── POST /upload-urls ─────────▶│                               │
+    │   "I need to upload 2 files"  │                               │
+    │                               │                               │
+    │                               │  API generates pre-signed     │
+    │                               │  URLs using our S3 credentials│
+    │                               │  (these URLs are temporary    │
+    │                               │   — expire in 15 minutes)     │
+    │                               │                               │
+    │◀── {                          │                               │
+    │     upload_urls: [            │                               │
+    │       {                       │                               │
+    │         field: "doc_front",   │                               │
+    │         url: "https://s3.eu-central-1.amazonaws.com/bucket    │
+    │               /abc/doc-front.jpg                              │
+    │               ?X-Amz-Algorithm=AWS4-HMAC-SHA256               │
+    │               &X-Amz-Credential=AKIA...                       │
+    │               &X-Amz-Date=20240115T103000Z                    │
+    │               &X-Amz-Expires=900                              │
+    │               &X-Amz-Signature=a1b2c3...",                    │
+    │         expires_in: 900       │                               │
+    │       },                      │                               │
+    │       {                       │                               │
+    │         field: "selfie",      │                               │
+    │         url: "https://s3.../bucket/abc/selfie.jpg?..."        │
+    │       }                       │                               │
+    │     ]                         │                               │
+    │   }                           │                               │
+    │                               │                               │
+    │── PUT (image bytes) ──────────────────────────────────────────▶│
+    │   to the pre-signed URL       │                               │
+    │   (goes DIRECTLY to S3,       │                               │
+    │    NOT through our API)        │                               │
+    │                               │                               │
+    │◀── 200 OK ───────────────────────────────────────────────────│
+    │                               │                               │
+    │                               │                               │
+    │  Now SDK has the S3 URIs      │                               │
+    │  and can call POST            │                               │
+    │  /verifications with them     │                               │
+    │                               │                               │
+
+
+  WHY PRE-SIGNED URLs?
+  POR QUE URLs PRE-FIRMADAS?
+
+  • The SDK CANNOT have S3 credentials (that would be in the user's phone
+    — anyone could extract them and access ALL our files)
+    El SDK NO PUEDE tener credenciales de S3 (estarian en el telefono
+    del usuario — cualquiera podria extraerlas)
+
+  • Instead, our API creates a TEMPORARY permission for ONE specific file
+    En vez, nuestra API crea un PERMISO TEMPORAL para UN archivo especifico
+
+  • The URL expires in 15 minutes — if someone intercepts it, it's useless after that
+    La URL expira en 15 minutos — si alguien la intercepta, es inutil despues
+
+  • Each URL only allows uploading to ONE specific path in S3
+    Cada URL solo permite subir a UN path especifico en S3</code></pre>
+
+  <!-- FULL AUTH SUMMARY -->
+  <h3>Complete auth flow in the sequence diagram</h3>
+  <p class="es">Flujo completo de auth en el diagrama de secuencia</p>
+
+<pre><code>  Customer         Our API          Orchestrator      OCR/Services       S3
+  Backend          Gateway
+    │                │                  │                  │              │
+    │                │                  │                  │              │
+    │  ═══ AUTH: Get token ═══════════════════════════════════════════════
+    │                │                  │                  │              │
+    │── POST /auth/token ──────────────▶│                  │              │
+    │   Authorization: Basic            │                  │              │
+    │   base64(api_key:api_secret)      │                  │              │
+    │                │                  │                  │              │
+    │◀── { access_token: "eyJ..." } ────│                  │              │
+    │                │                  │                  │              │
+    │  ═══ AUTH: Use token ═══════════════════════════════════════════════
+    │                │                  │                  │              │
+    │── POST /verifications ───────────▶│                  │              │
+    │   Authorization: Bearer eyJ...    │                  │              │
+    │                │                  │                  │              │
+    │                │  Validate JWT    │                  │              │
+    │                │  (signature,     │                  │              │
+    │                │   expiration,    │                  │              │
+    │                │   permissions)   │                  │              │
+    │                │                  │                  │              │
+    │                │── forward ──────▶│                  │              │
+    │                │  (customer_id    │                  │              │
+    │                │   extracted      │                  │              │
+    │                │   from JWT)      │                  │              │
+    │                │                  │                  │              │
+    │  ═══ AUTH: Service-to-service ══════════════════════════════════════
+    │                │                  │                  │              │
+    │                │                  │── POST /execute ─▶│              │
+    │                │                  │  Authorization:   │              │
+    │                │                  │  Bearer (internal │              │
+    │                │                  │  service token)   │              │
+    │                │                  │  OR: mTLS cert    │              │
+    │                │                  │                  │              │
+    │  ═══ AUTH: S3 upload (SDK case) ════════════════════════════════════
+    │                │                  │                  │              │
+    │  (SDK gets pre-signed URL         │                  │              │
+    │   from API, then uploads          │                  │              │
+    │   directly to S3 — no auth        │                  │              │
+    │   header needed, the URL          │                  │              │
+    │   IS the permission)              │                  │              │
+    │                │                  │                  │              │
+  Customer         Our API          Orchestrator      Services          S3
+</code></pre>
+
+  <h3>What we provide to the customer / Que le damos al cliente</h3>
+
+  <table>
+    <tr><th>What / Que</th><th>Description / Descripcion</th><th>Where they store it / Donde lo guardan</th></tr>
+    <tr>
+      <td><strong>API Key</strong></td>
+      <td>Public identifier. Like a username. Example: <code>dk_live_abc123</code></td>
+      <td>Config/environment variable on their server</td>
+    </tr>
+    <tr>
+      <td><strong>API Secret</strong></td>
+      <td>Private credential. Like a password. Example: <code>sk_live_xyz789</code></td>
+      <td>Secret manager (Vault, AWS Secrets, etc.) — NEVER in code</td>
+    </tr>
+    <tr>
+      <td><strong>SDK Token</strong></td>
+      <td>Short-lived token the customer's backend passes to their SDK. Scoped to one session.</td>
+      <td>Generated per session, passed to SDK at initialization</td>
+    </tr>
+    <tr>
+      <td><strong>API Documentation</strong></td>
+      <td>OpenAPI/Swagger spec with all endpoints, request/response formats</td>
+      <td>Developer portal</td>
+    </tr>
+    <tr>
+      <td><strong>SDK packages</strong></td>
+      <td>npm package (Web), CocoaPod (iOS), Maven (Android)</td>
+      <td>Installed in their app</td>
+    </tr>
+    <tr>
+      <td><strong>Webhook secret</strong></td>
+      <td>Secret to verify webhook callbacks are really from us (HMAC signature)</td>
+      <td>Their server config</td>
+    </tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">SDK initialization flow / Flujo de inicializacion del SDK</div>
+<pre><code>Customer's Backend                     Customer's App (SDK)
+      │                                      │
+      │  User wants to verify identity       │
+      │                                      │
+      │── POST /auth/sdk-token ─────────────▶ Our API
+      │   (using api_key + api_secret)       │
+      │◀── { sdk_token: "eyJ...",            │
+      │      session_id: "sess-456" } ────── Our API
+      │                                      │
+      │── "Here's your token" ──────────────▶│
+      │                                      │
+      │                        SDK.init({    │
+      │                          token: "eyJ...",
+      │                          session: "sess-456"
+      │                        })            │
+      │                                      │
+      │                        SDK now uses  │
+      │                        this token    │
+      │                        for all calls │
+      │                        to our API    │
+
+WHY? The SDK runs on the USER'S device — we can't put the api_secret
+there. Instead, the customer's backend gets a limited, short-lived
+sdk_token and passes it to the SDK.
+
+POR QUE? El SDK corre en el dispositivo del USUARIO — no podemos
+poner el api_secret ahi. En vez, el backend del cliente obtiene un
+sdk_token limitado y de corta duracion y se lo pasa al SDK.</code></pre>
+  </div>
+
+  <div class="qa">
+    <div class="question">"How do you handle authentication between the different layers?"</div>
+    <div class="answer">"Three levels. Customers authenticate with API key + secret to get a short-lived JWT Bearer token — standard OAuth2 client credentials flow. The JWT contains their customer_id and permissions, so we validate it without hitting the database on every request. For the SDK on the user's device, the customer's backend gets a scoped sdk_token and passes it to the SDK — we never put long-lived secrets on end-user devices. For service-to-service communication between the orchestrator and internal services, I'd use whatever the infrastructure provides — mTLS in a service mesh, or internal JWTs. And for S3 uploads from the SDK, we use pre-signed URLs — temporary, scoped permissions that expire in 15 minutes."</div>
+    <div class="answer-es">"Tres niveles. Los clientes se autentican con API key + secret para obtener un JWT Bearer token de corta duracion — flujo estandar OAuth2 client credentials. El JWT contiene su customer_id y permisos, lo validamos sin tocar la BD. Para el SDK en el dispositivo del usuario, el backend del cliente obtiene un sdk_token limitado. Para comunicacion servicio-a-servicio, mTLS o JWTs internos. Para subidas a S3, URLs pre-firmadas que expiran en 15 minutos."</div>
   </div>
 
   <!-- ============ WHAT TO SAY ============ -->
