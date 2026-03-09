@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Architecture — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="architecture.html" class="active">Architecture</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+    <a href="topic-9.html">HTTP &amp; Comms</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>System Architecture Overview</h1>
+  <p class="subtitle">Arquitectura General del Sistema &bull; <span class="tag tag-high">Draw This First</span></p>
+
+  <div class="callout warn">
+    <div class="label">This is what you draw on the whiteboard FIRST</div>
+    <p>Before diving into any topic, draw these 3 layers. This gives the interviewer the big picture and shows you think in systems, not just code.</p>
+    <p class="es">Antes de entrar en cualquier tema, dibuja estas 3 capas. Esto le da al entrevistador la vision general y muestra que piensas en sistemas, no solo en codigo.</p>
+  </div>
+
+  <!-- ============ THE 3 LAYERS ============ -->
+  <h2>The Three Layers / Las tres capas</h2>
+
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                        CLIENT LAYER                             │
+│                     Capa del Cliente                            │
+│                                                                 │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
+│   │ iOS SDK  │  │Android   │  │ Web SDK  │  │ Customer      │  │
+│   │          │  │  SDK     │  │          │  │ Backend       │  │
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬────────┘  │
+│        │             │             │               │            │
+└────────┼─────────────┼─────────────┼───────────────┼────────────┘
+         │             │             │               │
+         │    REST: POST /verifications              │
+         │    + webhook callback when done            │
+         │             │             │               │
+┌────────┼─────────────┼─────────────┼───────────────┼────────────┐
+│        ▼             ▼             ▼               ▼            │
+│                   PLATFORM LAYER                                │
+│                Capa de la Plataforma                            │
+│                                                                 │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │                    REST API Gateway                     │   │
+│   │         Authentication, rate limiting, routing          │   │
+│   └──────────────────────┬──────────────────────────────────┘   │
+│                          │                                      │
+│   ┌──────────────────────▼──────────────────────────────────┐   │
+│   │               WORKFLOW ORCHESTRATOR                      │   │
+│   │                                                          │   │
+│   │  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐   │   │
+│   │  │ DAG Engine  │  │ Workflow     │  │  Decision     │   │   │
+│   │  │ (your code) │  │ Context      │  │  Engine       │   │   │
+│   │  └─────────────┘  └──────────────┘  └───────────────┘   │   │
+│   │                                                          │   │
+│   └──────────────────────┬──────────────────────────────────┘   │
+│                          │                                      │
+│   ┌──────────────────────▼──────────────────────────────────┐   │
+│   │                   DATA LAYER                             │   │
+│   │   PostgreSQL    │   Object Storage (S3)   │  Event Log   │   │
+│   └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└────────┬─────────────┬─────────────┬───────────────┬────────────┘
+         │             │             │               │
+         │    REST: POST /execute (standard contract)│
+         │             │             │               │
+┌────────┼─────────────┼─────────────┼───────────────┼────────────┐
+│        ▼             ▼             ▼               ▼            │
+│                EXTERNAL SERVICES LAYER                          │
+│              Capa de Servicios Externos                         │
+│                                                                 │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
+│   │ Document │  │ Liveness │  │  Face    │  │  Sanctions    │  │
+│   │ AI (OCR) │  │ + PAD    │  │  Match   │  │  + PEP        │  │
+│   └──────────┘  └──────────┘  └──────────┘  └───────────────┘  │
+│                                                                 │
+│   ┌──────────┐  ┌──────────┐                                    │
+│   │   IAD    │  │ Video    │    ... more services               │
+│   │(deepfake)│  │  Ident   │                                    │
+│   └──────────┘  └──────────┘                                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘</code></pre>
+
+  <p class="es">Este es el diagrama completo. Tres capas: los clientes arriba, tu plataforma en el medio, los servicios externos abajo. Todo se comunica por REST.</p>
+
+  <!-- ============ CLIENT LAYER ============ -->
+  <h2>Layer 1: Client Layer / Capa del Cliente</h2>
+
+  <p>These are the consumers of your platform. They don't talk to services directly — they only talk to YOUR API.</p>
+  <p class="es">Estos son los consumidores de tu plataforma. No hablan con los servicios directamente — solo hablan con TU API.</p>
+
+  <table>
+    <tr><th>Client / Cliente</th><th>What it does / Que hace</th><th>How it connects / Como se conecta</th></tr>
+    <tr>
+      <td><strong>Mobile SDK (iOS/Android)</strong></td>
+      <td>Captures document photos + selfie on the user's device. Compresses and uploads images to object storage.</td>
+      <td>REST: <code>POST /verifications</code> with image URIs</td>
+    </tr>
+    <tr>
+      <td><strong>Web SDK</strong></td>
+      <td>Same as mobile but runs in the browser. Uses the device camera via WebRTC.</td>
+      <td>REST: <code>POST /verifications</code> with image URIs</td>
+    </tr>
+    <tr>
+      <td><strong>Customer Backend</strong></td>
+      <td>The customer's server (e.g. a bank). Receives results via webhook when verification completes.</td>
+      <td>REST: <code>GET /verifications/:id</code> + webhook callback</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <div class="label">Key design decision / Decision clave</div>
+    <p>The SDK uploads images to object storage FIRST, then sends URIs to the API. This means the API never handles raw image bytes — only references. Faster, lighter, scalable.</p>
+    <p class="es">El SDK sube imagenes al object storage PRIMERO, luego envia URIs a la API. La API nunca maneja bytes de imagen — solo referencias. Mas rapido, ligero, escalable.</p>
+  </div>
+
+<pre><code>SDK Flow / Flujo del SDK:
+
+  1. User opens app → SDK initializes
+     Usuario abre app → SDK se inicializa
+
+  2. SDK guides user to capture document photo
+     SDK guia al usuario a capturar foto del documento
+
+  3. SDK captures selfie/video for liveness
+     SDK captura selfie/video para liveness
+
+  4. SDK compresses + uploads images to object storage (S3)
+     SDK comprime + sube imagenes al object storage
+
+  5. SDK calls: POST /verifications
+     {
+       customer_id: "bank-prod",
+       document_type: "passport",
+       country: "DE",
+       images: {
+         doc_front: "s3://bucket/doc-front.jpg",
+         doc_back: "s3://bucket/doc-back.jpg",
+         selfie: "s3://bucket/selfie.jpg"
+       },
+       callback_url: "https://customer.com/webhook"
+     }
+
+  6. Platform returns: 202 Accepted + verification_id
+     La plataforma responde: 202 Accepted + verification_id
+
+  7. SDK polls or uses SSE for progress updates
+     SDK hace polling o usa SSE para actualizaciones
+
+  8. When done: platform POSTs result to callback_url
+     Al terminar: la plataforma envia resultado al callback_url</code></pre>
+
+  <!-- ============ PLATFORM LAYER ============ -->
+  <h2>Layer 2: Platform Layer / Capa de la Plataforma</h2>
+
+  <p>This is YOUR system. Everything inside this box is what you're designing in the interview.</p>
+  <p class="es">Este es TU sistema. Todo dentro de esta caja es lo que estas disenando en la entrevista.</p>
+
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                     PLATFORM LAYER                          │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                  REST API Gateway                     │  │
+│  │                                                       │  │
+│  │  • Authenticates customer (API key)                   │  │
+│  │  • Rate limiting                                      │  │
+│  │  • Routes to correct handler                          │  │
+│  │  • POST /verifications → create workflow              │  │
+│  │  • GET  /verifications/:id → check status             │  │
+│  │  • GET  /verifications/:id/events → SSE stream        │  │
+│  └───────────────────────┬───────────────────────────────┘  │
+│                          │                                  │
+│  ┌───────────────────────▼───────────────────────────────┐  │
+│  │              WORKFLOW ORCHESTRATOR                     │  │
+│  │                                                       │  │
+│  │  ┌─────────────┐                                      │  │
+│  │  │ Workflow     │  Selects the right DAG based on     │  │
+│  │  │ Selector    │  country + document type + customer  │  │
+│  │  └──────┬──────┘                                      │  │
+│  │         │                                             │  │
+│  │  ┌──────▼──────┐                                      │  │
+│  │  │ DAG Engine  │  Your executeWorkflow() function     │  │
+│  │  │             │  Resolves deps, runs steps parallel  │  │
+│  │  │             │  Manages logical clock               │  │
+│  │  └──────┬──────┘                                      │  │
+│  │         │                                             │  │
+│  │  ┌──────▼──────────────────────────────────────────┐  │  │
+│  │  │ Workflow Context                                 │  │  │
+│  │  │                                                  │  │  │
+│  │  │ Shared data bag:                                 │  │  │
+│  │  │   inputs:  { country, doc_type, image_uris }     │  │  │
+│  │  │   outputs: { ocr: {...}, liveness: {...}, ... }   │  │  │
+│  │  │                                                  │  │  │
+│  │  │ Each step reads what it needs, writes results    │  │  │
+│  │  └─────────────────────────────────────────────────┘  │  │
+│  │         │                                             │  │
+│  │  ┌──────▼──────┐                                      │  │
+│  │  │ Decision    │  After all steps: evaluate rules     │  │
+│  │  │ Engine      │  → APPROVED / REJECTED / MANUAL      │  │
+│  │  └─────────────┘                                      │  │
+│  │                                                       │  │
+│  └───────────────────────┬───────────────────────────────┘  │
+│                          │                                  │
+│  ┌───────────────────────▼───────────────────────────────┐  │
+│  │                    DATA LAYER                         │  │
+│  │                                                       │  │
+│  │  ┌─────────────┐  ┌────────────┐  ┌────────────────┐  │  │
+│  │  │ PostgreSQL  │  │ Object     │  │ Event Log      │  │  │
+│  │  │             │  │ Storage    │  │                │  │  │
+│  │  │ • workflow  │  │ (S3)       │  │ • Audit trail  │  │  │
+│  │  │   instances │  │            │  │ • Step events  │  │  │
+│  │  │ • step      │  │ • Document │  │ • Compliance   │  │  │
+│  │  │   results   │  │   images   │  │   (legally     │  │  │
+│  │  │ • workflow  │  │ • Face     │  │    required)   │  │  │
+│  │  │   context   │  │   crops    │  │                │  │  │
+│  │  │ • decisions │  │ • Video    │  │                │  │  │
+│  │  └─────────────┘  └────────────┘  └────────────────┘  │  │
+│  │                                                       │  │
+│  │  All data stays in EU data centers (eIDAS / GDPR)     │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+
+  <h3>Components explained / Componentes explicados</h3>
+
+  <table>
+    <tr><th>Component</th><th>Responsibility / Responsabilidad</th><th>Topic link</th></tr>
+    <tr>
+      <td><strong>API Gateway</strong></td>
+      <td>Entry point. Auth, rate limiting, creates workflow instances. Returns 202 + ID.</td>
+      <td><a href="topic-7.html">Topic 7: Proposals</a></td>
+    </tr>
+    <tr>
+      <td><strong>Workflow Selector</strong></td>
+      <td>Picks the right DAG definition based on country, document type, and customer config.</td>
+      <td><a href="topic-6.html">Topic 6: Branching</a></td>
+    </tr>
+    <tr>
+      <td><strong>DAG Engine</strong></td>
+      <td>Your <code>executeWorkflow()</code>. Resolves dependencies, runs steps in parallel, tracks clock ticks.</td>
+      <td><a href="index.html">Home (What You Built)</a></td>
+    </tr>
+    <tr>
+      <td><strong>Workflow Context</strong></td>
+      <td>Shared data bag. Steps read inputs and write outputs. Passed by reference, not copy.</td>
+      <td><a href="topic-1.html">Topic 1: Data Flow</a></td>
+    </tr>
+    <tr>
+      <td><strong>Decision Engine</strong></td>
+      <td>Evaluates business rules on all step outputs. Returns APPROVED / REJECTED / MANUAL_REVIEW.</td>
+      <td><a href="topic-3.html">Topic 3: Decision</a></td>
+    </tr>
+    <tr>
+      <td><strong>PostgreSQL</strong></td>
+      <td>Persists workflow state after each step. Enables crash recovery.</td>
+      <td><a href="topic-5.html">Topic 5: Persistence</a></td>
+    </tr>
+    <tr>
+      <td><strong>Object Storage (S3)</strong></td>
+      <td>Stores images, face crops, video frames. Steps pass URIs, not bytes.</td>
+      <td><a href="topic-1.html">Topic 1: Data Flow</a></td>
+    </tr>
+    <tr>
+      <td><strong>Event Log</strong></td>
+      <td>Append-only audit trail. Every state change recorded. Legally required (eIDAS, AMLR).</td>
+      <td><a href="topic-5.html">Topic 5: Persistence</a> / <a href="topic-8.html">Topic 8: Observability</a></td>
+    </tr>
+  </table>
+
+  <!-- ============ EXTERNAL SERVICES ============ -->
+  <h2>Layer 3: External Services / Servicios Externos</h2>
+
+  <p>These are internal AI/ML and compliance services behind REST endpoints. Your orchestrator calls them — you don't build them. Each follows the <a href="topic-7.html">standard step contract</a>.</p>
+  <p class="es">Estos son servicios internos de IA/ML y compliance detras de endpoints REST. Tu orquestador los llama — tu no los construyes. Cada uno sigue el contrato estandar de pasos.</p>
+
+  <table>
+    <tr><th>Service</th><th>Input / Entrada</th><th>Output / Salida</th><th>Time</th></tr>
+    <tr>
+      <td><strong>Document AI (OCR)</strong></td>
+      <td>Document image URI</td>
+      <td>Extracted fields (name, DOB, doc number, expiry), confidence score, face crop URI</td>
+      <td>2-10s</td>
+    </tr>
+    <tr>
+      <td><strong>Liveness + PAD</strong></td>
+      <td>Selfie/video URI</td>
+      <td>alive=bool, confidence, best frame URI, PAD score</td>
+      <td>1-5s</td>
+    </tr>
+    <tr>
+      <td><strong>Face Match</strong></td>
+      <td>Two face image URIs (from OCR + liveness)</td>
+      <td>match_score (0-1)</td>
+      <td>1-3s</td>
+    </tr>
+    <tr>
+      <td><strong>Sanctions + PEP</strong></td>
+      <td>Name, DOB, nationality</td>
+      <td>hit=bool, match details, requires_manual_review flag</td>
+      <td>1-15s</td>
+    </tr>
+    <tr>
+      <td><strong>IAD (Injection Attack Detection)</strong></td>
+      <td>Video stream metadata</td>
+      <td>injected=bool, confidence</td>
+      <td>1-3s</td>
+    </tr>
+    <tr>
+      <td><strong>Video Ident</strong></td>
+      <td>All previous outputs + video call link</td>
+      <td>agent_verdict, notes</td>
+      <td>Minutes (async)</td>
+    </tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">Standard contract / Contrato estandar</div>
+    <p>Every service follows the SAME interface. The orchestrator sends <code>POST /execute</code> with <code>{workflow_id, step_id, inputs}</code> and gets back <code>{status, outputs, error}</code>. No special code per service.</p>
+    <p class="es">Cada servicio sigue la MISMA interfaz. El orquestador envia POST /execute y recibe {status, outputs, error}. Sin codigo especial por servicio.</p>
+  </div>
+
+  <!-- ============ END-TO-END FLOW ============ -->
+  <h2>End-to-End Flow / Flujo completo</h2>
+
+  <p>Here's what happens from the moment a user opens an app to the final result:</p>
+  <p class="es">Esto es lo que pasa desde que el usuario abre una app hasta el resultado final:</p>
+
+<pre><code>USER's PHONE                    PLATFORM                         SERVICES
+(SDK)                       (your system)                    (AI/ML teams)
+    │                              │                              │
+    │  1. Capture doc + selfie     │                              │
+    │  2. Upload to S3             │                              │
+    │                              │                              │
+    │── 3. POST /verifications ──▶│                              │
+    │   {images, country, type}    │                              │
+    │                              │                              │
+    │◀── 4. 202 Accepted ─────────│                              │
+    │   {verification_id}          │                              │
+    │                              │  5. Select DAG (country+type)│
+    │                              │  6. Create workflow instance  │
+    │                              │  7. Save to PostgreSQL        │
+    │                              │                              │
+    │                              │══ CLOCK TICK 0 ══════════════│
+    │                              │                              │
+    │                              │── POST /execute (OCR) ──────▶│ Document AI
+    │                              │── POST /execute (liveness) ─▶│ Biometric AI
+    │                              │                              │
+    │  8. SSE: "Analyzing          │◀── {name, DOB, face_crop} ──│
+    │     document..."             │◀── {alive, best_frame} ──────│
+    │                              │                              │
+    │                              │  9. Save outputs to DB       │
+    │                              │                              │
+    │                              │══ CLOCK TICK 1 ══════════════│
+    │                              │                              │
+    │                              │── POST /execute (face) ─────▶│ Biometric AI
+    │                              │── POST /execute (sanctions) ─▶│ Compliance
+    │                              │                              │
+    │  10. SSE: "Verifying         │◀── {match_score: 0.94} ──────│
+    │      identity..."            │◀── {hit: false} ─────────────│
+    │                              │                              │
+    │                              │  11. Save outputs to DB      │
+    │                              │                              │
+    │                              │══ CLOCK TICK 2 ══════════════│
+    │                              │                              │
+    │                              │  12. Decision Engine:         │
+    │                              │      All checks pass          │
+    │                              │      → verdict: APPROVED      │
+    │                              │                              │
+    │                              │  13. Save final result        │
+    │                              │  14. Log audit event          │
+    │                              │                              │
+    │◀── 15. SSE: "Approved!" ─────│                              │
+    │                              │                              │
+    │                              │── 16. POST callback_url ────▶│ Customer
+    │                              │   {verdict: "APPROVED",      │ Backend
+    │                              │    extracted_data: {...}}     │
+    │                              │                              │</code></pre>
+
+  <!-- ============ WHAT TO SAY ============ -->
+  <h2>What to Say on the Whiteboard / Que decir en la pizarra</h2>
+
+  <div class="qa">
+    <div class="question">"Walk me through the system architecture."</div>
+    <div class="answer">"The system has three layers. At the top: clients — mobile SDKs, web SDK, and customer backends. They interact with our REST API. In the middle: our platform — the API gateway handles auth and routing, the workflow orchestrator runs a DAG of verification steps, and the data layer persists state to PostgreSQL with images in object storage. At the bottom: external services — internal AI/ML teams behind REST endpoints. OCR, liveness detection with PAD, face matching, sanctions screening. Every service follows a standard contract: we send workflow_id + step_id + inputs, they return status + outputs. The orchestrator doesn't have service-specific code — adding a new service means defining a new step in the DAG, not changing the engine."</div>
+    <div class="answer-es">"El sistema tiene tres capas. Arriba: clientes — SDKs moviles, web SDK, backends de clientes. Hablan con nuestra API REST. En el medio: nuestra plataforma — el gateway maneja auth y routing, el orquestador ejecuta un DAG de pasos de verificacion, y la capa de datos persiste estado en PostgreSQL con imagenes en object storage. Abajo: servicios externos — equipos de IA/ML detras de endpoints REST. OCR, liveness con PAD, face matching, sanciones. Cada servicio sigue un contrato estandar. El orquestador no tiene codigo especifico por servicio — agregar un servicio nuevo es definir un paso en el DAG, no cambiar el motor."</div>
+  </div>
+
+  <div class="qa">
+    <div class="question">"What communication protocol do you use between layers?"</div>
+    <div class="answer">"Everything is REST. Clients call our API via POST/GET. Our orchestrator calls services via POST /execute. Results come back synchronously with a generous timeout per service type. For the client layer, we return 202 Accepted immediately and offer SSE for real-time progress updates plus a webhook callback when verification completes. If a specific service proves too slow, we can migrate that ONE integration to async with a callback — but start simple."</div>
+    <div class="answer-es">"Todo es REST. Los clientes llaman nuestra API via POST/GET. El orquestador llama servicios via POST /execute. Resultados sincrónicos con timeout generoso. Para el cliente, 202 Accepted inmediato + SSE para progreso en tiempo real + webhook cuando termina. Si un servicio resulta muy lento, migramos ESA integracion a async — pero empezar simple."</div>
+  </div>
+
+  <div class="qa">
+    <div class="question">"Where does data live?"</div>
+    <div class="answer">"Three stores, all in EU. PostgreSQL for workflow state — instances, step results, decisions. Object storage (S3-compatible) for binary data — document images, face crops, video frames. Steps pass URIs, never raw bytes. And an append-only event log for audit trail — every state change recorded with timestamps. The event log is legally required for eIDAS and AMLR compliance."</div>
+    <div class="answer-es">"Tres almacenes, todo en la UE. PostgreSQL para estado del workflow. Object storage para datos binarios — imagenes, face crops, video. Los pasos pasan URIs, nunca bytes. Y un log de eventos append-only para auditoria — cada cambio de estado registrado. El log es legalmente requerido por eIDAS y AMLR."</div>
+  </div>
+
+  <!-- ============ MONOREPO ============ -->
+  <h2>Monorepo Structure / Estructura del monorepo</h2>
+
+  <p>The whole platform lives in a monorepo. This is how the packages map to the architecture:</p>
+  <p class="es">Toda la plataforma vive en un monorepo. Asi se mapean los paquetes a la arquitectura:</p>
+
+<pre><code>packages/
+  ┌─ workflow-engine/          ← DAG executor (your code)
+  │                              Resolves deps, runs parallel, clock ticks
+  │
+  ├─ workflow-api/             ← REST API for clients
+  │                              POST /verifications, GET /verifications/:id
+  │                              Authentication, rate limiting
+  │
+  ├─ workflow-persistence/     ← Database layer
+  │                              PostgreSQL queries, event log writes
+  │                              Crash recovery logic
+  │
+  ├─ decision-engine/          ← Business rules
+  │                              Evaluates all outputs → verdict
+  │                              Configurable per customer/country
+  │
+  ├─ step-contracts/           ← SHARED with other teams
+  │                              Request/response types for step interface
+  │                              Error format definitions
+  │                              Other teams import this package
+  │
+  └─ workflow-dashboard/       ← Ops UI
+                                 Monitor workflows, see stuck verifications
+                                 Manual review queue</code></pre>
+
+  <div class="callout success">
+    <div class="label">Why a monorepo matters here</div>
+    <p>The <code>step-contracts</code> package is shared with the AI/ML and compliance teams. When you change the contract, everyone updates together — no version mismatch across services.</p>
+    <p class="es">El paquete step-contracts se comparte con los equipos de IA/ML y compliance. Cuando cambias el contrato, todos actualizan juntos — sin problemas de versiones.</p>
+  </div>
+
+  <!-- ============ SIMPLIFIED WHITEBOARD VERSION ============ -->
+  <h2>Simplified Version for the Whiteboard</h2>
+
+  <p>You won't have time to draw everything above. Here's the simplified version to draw in 2-3 minutes:</p>
+  <p class="es">No tendras tiempo de dibujar todo. Aqui la version simplificada para dibujar en 2-3 minutos:</p>
+
+<pre><code>
+  ┌─────────┐  ┌─────────┐  ┌──────────────┐
+  │ iOS SDK │  │ Web SDK │  │ Customer API │
+  └────┬────┘  └────┬────┘  └──────┬───────┘
+       │            │              │
+       └──────────┐ │ ┌────────────┘
+                  ▼ ▼ ▼
+            ┌─────────────┐
+            │  REST API   │  ← auth, rate limit
+            └──────┬──────┘
+                   │
+            ┌──────▼──────┐
+            │ ORCHESTRATOR│  ← DAG engine
+            │             │    workflow context
+            │             │    decision engine
+            └──────┬──────┘
+                   │
+            ┌──────▼──────┐
+            │ PostgreSQL  │  ← state + audit
+            │ + S3        │    images
+            └──────┬──────┘
+                   │
+       ┌───────────┼───────────┐
+       ▼           ▼           ▼
+  ┌─────────┐ ┌─────────┐ ┌──────────┐
+  │   OCR   │ │Liveness │ │Sanctions │  ... more
+  │         │ │ + PAD   │ │ + PEP    │
+  └─────────┘ └─────────┘ └──────────┘
+
+  All communication: REST
+  All data: EU only
+</code></pre>
+
+  <div class="callout warn">
+    <div class="label">Whiteboard tip / Consejo para la pizarra</div>
+    <p>Draw the simplified version FIRST. Then zoom into the orchestrator box to explain DAG execution, data flow, and decision logic. This top-down approach shows you think architecturally.</p>
+    <p class="es">Dibuja la version simplificada PRIMERO. Luego acercate a la caja del orquestador para explicar ejecucion del DAG, flujo de datos, y logica de decision. Este enfoque top-down muestra que piensas arquitecturalmente.</p>
+  </div>
+
+  <a href="topic-1.html" class="back-top">Next: Data Flow Between Steps &rarr;</a>
+
+</div>
+</body>
+</html>
