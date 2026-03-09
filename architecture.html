@@ -336,62 +336,283 @@
     <p class="es">Cada servicio sigue la MISMA interfaz. El orquestador envia POST /execute y recibe {status, outputs, error}. Sin codigo especial por servicio.</p>
   </div>
 
-  <!-- ============ END-TO-END FLOW ============ -->
-  <h2>End-to-End Flow / Flujo completo</h2>
+  <!-- ============ SEQUENCE DIAGRAM ============ -->
+  <h2>Full Sequence Diagram / Diagrama de secuencia completo</h2>
 
-  <p>Here's what happens from the moment a user opens an app to the final result:</p>
-  <p class="es">Esto es lo que pasa desde que el usuario abre una app hasta el resultado final:</p>
+  <p>Like a UML sequence diagram — every actor is a column, arrows show who talks to whom, and you can see exactly WHEN and WHERE data gets stored.</p>
+  <p class="es">Como un diagrama de secuencia UML — cada actor es una columna, las flechas muestran quien habla con quien, y ves exactamente CUANDO y DONDE se guardan los datos.</p>
 
-<pre><code>USER's PHONE                    PLATFORM                         SERVICES
-(SDK)                       (your system)                    (AI/ML teams)
-    │                              │                              │
-    │  1. Capture doc + selfie     │                              │
-    │  2. Upload to S3             │                              │
-    │                              │                              │
-    │── 3. POST /verifications ──▶│                              │
-    │   {images, country, type}    │                              │
-    │                              │                              │
-    │◀── 4. 202 Accepted ─────────│                              │
-    │   {verification_id}          │                              │
-    │                              │  5. Select DAG (country+type)│
-    │                              │  6. Create workflow instance  │
-    │                              │  7. Save to PostgreSQL        │
-    │                              │                              │
-    │                              │══ CLOCK TICK 0 ══════════════│
-    │                              │                              │
-    │                              │── POST /execute (OCR) ──────▶│ Document AI
-    │                              │── POST /execute (liveness) ─▶│ Biometric AI
-    │                              │                              │
-    │  8. SSE: "Analyzing          │◀── {name, DOB, face_crop} ──│
-    │     document..."             │◀── {alive, best_frame} ──────│
-    │                              │                              │
-    │                              │  9. Save outputs to DB       │
-    │                              │                              │
-    │                              │══ CLOCK TICK 1 ══════════════│
-    │                              │                              │
-    │                              │── POST /execute (face) ─────▶│ Biometric AI
-    │                              │── POST /execute (sanctions) ─▶│ Compliance
-    │                              │                              │
-    │  10. SSE: "Verifying         │◀── {match_score: 0.94} ──────│
-    │      identity..."            │◀── {hit: false} ─────────────│
-    │                              │                              │
-    │                              │  11. Save outputs to DB      │
-    │                              │                              │
-    │                              │══ CLOCK TICK 2 ══════════════│
-    │                              │                              │
-    │                              │  12. Decision Engine:         │
-    │                              │      All checks pass          │
-    │                              │      → verdict: APPROVED      │
-    │                              │                              │
-    │                              │  13. Save final result        │
-    │                              │  14. Log audit event          │
-    │                              │                              │
-    │◀── 15. SSE: "Approved!" ─────│                              │
-    │                              │                              │
-    │                              │── 16. POST callback_url ────▶│ Customer
-    │                              │   {verdict: "APPROVED",      │ Backend
-    │                              │    extracted_data: {...}}     │
-    │                              │                              │</code></pre>
+  <div class="callout warn">
+    <div class="label">This is the key diagram / Este es el diagrama clave</div>
+    <p>This is what you'd draw on a whiteboard to show the full system flow. It answers: "where do files live?", "when do we hit the database?", and "what calls what?"</p>
+    <p class="es">Esto es lo que dibujarias en la pizarra. Responde: "donde viven los archivos?", "cuando tocamos la base de datos?", y "quien llama a quien?"</p>
+  </div>
+
+<pre><code>  SDK/App        API Gateway     Orchestrator     PostgreSQL    S3 (Object     OCR        Liveness    Face Match   Sanctions
+  (user's        (REST API)      (DAG Engine)     (state +      Storage)       Service    + PAD       Service      + PEP
+   device)                                         audit)       (images)
+    │                │                │                │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │  ══════════════════════ PHASE 1: CAPTURE + UPLOAD ══════════════════════════════════════════════════════════════ │
+    │                │                │                │             │             │           │           │           │
+    │  User captures │                │                │             │             │           │           │           │
+    │  document +    │                │                │             │             │           │           │           │
+    │  selfie        │                │                │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │── PUT doc_front.jpg ──────────────────────────────────────────▶│             │           │           │           │
+    │◀── 200 OK {uri: "s3://bucket/doc-front.jpg"} ─────────────────│             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │── PUT selfie.jpg ─────────────────────────────────────────────▶│             │           │           │           │
+    │◀── 200 OK {uri: "s3://bucket/selfie.jpg"} ────────────────────│             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │  Images now    │                │                │             │             │           │           │           │
+    │  live in S3    │                │                │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │  ════════════════════ PHASE 2: START VERIFICATION ════════════════════════════════════════════════════════════── │
+    │                │                │                │             │             │           │           │           │
+    │── POST /verifications ────────▶│                │             │             │           │           │           │
+    │   {country:"DE",               │                │             │             │           │           │           │
+    │    doc_type:"passport",        │                │             │             │           │           │           │
+    │    images:{doc:"s3://...",      │                │             │             │           │           │           │
+    │            selfie:"s3://..."},  │                │             │             │           │           │           │
+    │    callback_url:"https://..."}─▶│                │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │── Validate + authenticate ─────▶│             │             │           │           │           │
+    │                │   (API key check)               │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │── Create workflow ──────────────▶│             │             │           │           │           │
+    │                │   {country, type, image_uris}   │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │  Select DAG    │             │             │           │           │           │
+    │                │                │  (DE+passport  │             │             │           │           │           │
+    │                │                │   → standard   │             │             │           │           │           │
+    │                │                │     flow)      │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── INSERT ──────▶│             │             │           │           │           │
+    │                │                │   workflow_     │             │             │           │           │           │
+    │                │                │   instances     │             │             │           │           │           │
+    │                │                │   {id, status:  │             │             │           │           │           │
+    │                │                │    "RUNNING",   │             │             │           │           │           │
+    │                │                │    context}     │             │             │           │           │           │
+    │                │                │◀── OK ──────────│             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── INSERT ──────▶│             │             │           │           │           │
+    │                │                │   workflow_     │             │             │           │           │           │
+    │                │                │   events       │             │             │           │           │           │
+    │                │                │   {WORKFLOW_    │             │             │           │           │           │
+    │                │                │    CREATED}     │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │◀── 202 Accepted ───────────────│                │             │             │           │           │           │
+    │   {verification_id: "abc-123"} │                │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │── GET /verifications/abc-123/events (SSE) ─────▶│             │             │           │           │           │
+    │   (keep connection open for progress)           │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │  ═══════════════════════════ PHASE 3: CLOCK TICK 0 (parallel) ════════════════════════════════════════════════  │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── POST /execute ────────────────────────────────────▶│           │           │
+    │                │                │   {workflow_id:"abc-123",                            │           │           │
+    │                │                │    step_id:"ocr",                                    │           │           │
+    │                │                │    inputs:{doc_image:"s3://bucket/doc-front.jpg"}}   │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── POST /execute ──────────────────────────────────────────────▶│           │
+    │                │                │   {workflow_id:"abc-123",                                      │           │
+    │                │                │    step_id:"liveness",                                         │           │
+    │                │                │    inputs:{selfie:"s3://bucket/selfie.jpg"}}                   │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │                │             │  OCR reads   │           │           │           │
+    │                │                │                │             │  image from  │           │           │           │
+    │                │                │                │             │◀─ GET ───────│           │           │           │
+    │                │                │                │             │── image ────▶│           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │                │             │  OCR saves   │           │           │           │
+    │                │                │                │             │  face crop   │           │           │           │
+    │                │                │                │             │◀─ PUT ───────│           │           │           │
+    │                │                │                │             │  face.jpg    │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │                │             │  Liveness    │           │           │
+    │                │                │                │             │  reads video │           │           │
+    │                │                │                │             │◀─ GET ────────────────────│           │           │
+    │                │                │                │             │── video ─────────────────▶│           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │                │             │  Liveness    │           │           │           │
+    │                │                │                │             │  saves best  │           │           │           │
+    │                │                │                │             │  frame       │           │           │           │
+    │                │                │                │             │◀─ PUT ────────────────────│           │           │
+    │                │                │                │             │  frame.jpg   │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │◀── {status:"completed", ────────────────────│           │           │           │
+    │                │                │     outputs:{name:"Jane Doe",              │           │           │           │
+    │                │                │      DOB:"1990-01-01",                     │           │           │           │
+    │                │                │      confidence:0.97,                      │           │           │           │
+    │                │                │      face_crop:"s3://bucket/face.jpg"}} ───│           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │◀── {status:"completed", ───────────────────────────────│           │           │
+    │                │                │     outputs:{alive:true,                               │           │           │
+    │                │                │      confidence:0.95,                                  │           │           │
+    │                │                │      best_frame:"s3://bucket/frame.jpg"}} ─────────────│           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── UPDATE ──────▶│             │             │           │           │           │
+    │                │                │   step_executions             │             │           │           │           │
+    │                │                │   ocr: COMPLETED│             │             │           │           │           │
+    │                │                │   liveness:     │             │             │           │           │           │
+    │                │                │    COMPLETED    │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── INSERT ──────▶│             │             │           │           │           │
+    │                │                │   workflow_events             │             │           │           │           │
+    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
+    │                │                │    step:"ocr", clock:0}      │             │           │           │           │
+    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
+    │                │                │    step:"liveness",clock:0}  │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │◀── SSE: {"step":"ocr","status":"completed"} ────│             │             │           │           │           │
+    │◀── SSE: {"step":"liveness","status":"completed"}│             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │  ═══════════════════════════ PHASE 4: CLOCK TICK 1 (parallel) ════════════════════════════════════════════════  │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── POST /execute ──────────────────────────────────────────────────▶│           │
+    │                │                │   {step_id:"face_match",                                          │           │
+    │                │                │    inputs:{face_crop:"s3://bucket/face.jpg",                      │           │
+    │                │                │            best_frame:"s3://bucket/frame.jpg"}}                   │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── POST /execute ──────────────────────────────────────────────────────────────▶│
+    │                │                │   {step_id:"sanctions",                                                       │
+    │                │                │    inputs:{name:"Jane Doe",                                                   │
+    │                │                │            DOB:"1990-01-01",                                                  │
+    │                │                │            nationality:"DE"}}                                                 │
+    │                │                │                │             │             │           │           │           │
+    │                │                │                │             │  Face Match  │           │           │           │
+    │                │                │                │             │  reads both  │           │           │           │
+    │                │                │                │             │  images      │           │           │           │
+    │                │                │                │             │◀─ GET ────────────────────────────────│           │
+    │                │                │                │             │── images ────────────────────────────▶│           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │◀── {status:"completed", ────────────────────────────────────────────│           │
+    │                │                │     outputs:{match_score:0.94}} ────────────────────────────────────│           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │◀── {status:"completed", ────────────────────────────────────────────────────────│
+    │                │                │     outputs:{hit:false,                                                         │
+    │                │                │      requires_manual_review:false}} ────────────────────────────────────────────│
+    │                │                │                │             │             │           │           │           │
+    │                │                │── UPDATE ──────▶│             │             │           │           │           │
+    │                │                │   step_executions             │             │           │           │           │
+    │                │                │   face_match:   │             │             │           │           │           │
+    │                │                │    COMPLETED    │             │             │           │           │           │
+    │                │                │   sanctions:    │             │             │           │           │           │
+    │                │                │    COMPLETED    │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── INSERT ──────▶│             │             │           │           │           │
+    │                │                │   workflow_events             │             │           │           │           │
+    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
+    │                │                │    step:"face_match",        │             │           │           │           │
+    │                │                │    clock:1}                  │             │           │           │           │
+    │                │                │   {STEP_COMPLETED,           │             │           │           │           │
+    │                │                │    step:"sanctions",         │             │           │           │           │
+    │                │                │    clock:1}                  │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │  ═══════════════════════════ PHASE 5: CLOCK TICK 2 (decision) ════════════════════════════════════════════════  │
+    │                │                │                │             │             │           │           │           │
+    │                │                │  Decision Engine               │             │           │           │           │
+    │                │                │  (internal, no                │             │           │           │           │
+    │                │                │   external call):             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │  ocr.confidence: 0.97  ✓     │             │           │           │           │
+    │                │                │  liveness.alive: true   ✓    │             │           │           │           │
+    │                │                │  face_match: 0.94      ✓    │             │           │           │           │
+    │                │                │  sanctions.hit: false   ✓    │             │           │           │           │
+    │                │                │  → verdict: APPROVED         │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── UPDATE ──────▶│             │             │           │           │           │
+    │                │                │   workflow_     │             │             │           │           │           │
+    │                │                │   instances     │             │             │           │           │           │
+    │                │                │   status:       │             │             │           │           │           │
+    │                │                │   "COMPLETED"   │             │             │           │           │           │
+    │                │                │   verdict:      │             │             │           │           │           │
+    │                │                │   "APPROVED"    │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── INSERT ──────▶│             │             │           │           │           │
+    │                │                │   workflow_events             │             │           │           │           │
+    │                │                │   {WORKFLOW_    │             │             │           │           │           │
+    │                │                │    COMPLETED,   │             │             │           │           │           │
+    │                │                │    verdict:     │             │             │           │           │           │
+    │                │                │    "APPROVED"}  │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │  ═══════════════════════════ PHASE 6: NOTIFY ═════════════════════════════════════════════════════════════════  │
+    │                │                │                │             │             │           │           │           │
+    │◀── SSE: {"verdict":"APPROVED","details":{...}} ─│             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+    │                │                │── POST callback_url ──────────────────────────────────────────────────────────▶
+    │                │                │   {verification_id:"abc-123",                         Customer Backend
+    │                │                │    verdict:"APPROVED",
+    │                │                │    extracted_data:{name:"Jane Doe",DOB:"1990-01-01"},
+    │                │                │    details:{ocr_confidence:0.97,face_match:0.94}}
+    │                │                │                │             │             │           │           │           │
+    │                │                │                │             │             │           │           │           │
+  SDK/App        API Gateway     Orchestrator     PostgreSQL      S3            OCR        Liveness    Face Match   Sanctions
+</code></pre>
+
+  <h3>Where data lives — summary / Donde viven los datos</h3>
+
+  <table>
+    <tr><th>What / Que</th><th>Where / Donde</th><th>Why / Por que</th></tr>
+    <tr>
+      <td><strong>Document images</strong> (front, back)</td>
+      <td>S3 Object Storage</td>
+      <td>Binary files, too large for DB. SDK uploads directly. Services read via URI.</td>
+    </tr>
+    <tr>
+      <td><strong>Selfie / video</strong></td>
+      <td>S3 Object Storage</td>
+      <td>Same — binary media. Liveness service reads from S3.</td>
+    </tr>
+    <tr>
+      <td><strong>Face crop</strong> (extracted by OCR)</td>
+      <td>S3 Object Storage</td>
+      <td>OCR service creates it, saves to S3, returns URI. Face Match reads it.</td>
+    </tr>
+    <tr>
+      <td><strong>Best frame</strong> (from liveness)</td>
+      <td>S3 Object Storage</td>
+      <td>Liveness picks the best frame, saves to S3. Face Match reads it.</td>
+    </tr>
+    <tr>
+      <td><strong>Workflow state</strong> (status, step results)</td>
+      <td>PostgreSQL</td>
+      <td>ACID transactions. Updated after each step. Enables crash recovery.</td>
+    </tr>
+    <tr>
+      <td><strong>Step outputs</strong> (name, DOB, scores)</td>
+      <td>PostgreSQL (JSONB)</td>
+      <td>Structured data, small. Stored as JSONB for flexibility.</td>
+    </tr>
+    <tr>
+      <td><strong>Audit events</strong></td>
+      <td>PostgreSQL (Event Log)</td>
+      <td>Append-only. Every state change. Legally required (eIDAS, AMLR).</td>
+    </tr>
+    <tr>
+      <td><strong>Final verdict</strong></td>
+      <td>PostgreSQL</td>
+      <td>APPROVED / REJECTED / MANUAL_REVIEW + reason. Queryable for analytics.</td>
+    </tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">The rule / La regla</div>
+    <p><strong>Binary files (images, video) → S3.</strong> <strong>Structured data (status, scores, decisions) → PostgreSQL.</strong> Steps never pass raw bytes — they pass S3 URIs. This keeps the orchestrator lightweight and the database small.</p>
+    <p class="es"><strong>Archivos binarios (imagenes, video) → S3.</strong> <strong>Datos estructurados (estado, puntajes, decisiones) → PostgreSQL.</strong> Los pasos nunca pasan bytes — pasan URIs de S3. Esto mantiene el orquestador ligero y la base de datos pequena.</p>
+  </div>
+
+  <div class="callout">
+    <div class="label">When does the DB get written? / Cuando se escribe en la BD?</div>
+    <ol>
+      <li><strong>Workflow created</strong> → INSERT workflow_instances + INSERT workflow_events</li>
+      <li><strong>After each clock tick</strong> → UPDATE step_executions + INSERT workflow_events (per step)</li>
+      <li><strong>Decision made</strong> → UPDATE workflow_instances (verdict) + INSERT workflow_events</li>
+      <li><strong>Each write is a transaction</strong> — never a half-written state</li>
+    </ol>
+    <p class="es">1. Workflow creado → INSERT. 2. Despues de cada clock tick → UPDATE + INSERT eventos. 3. Decision tomada → UPDATE + INSERT. 4. Cada escritura es una transaccion.</p>
+  </div>
 
   <!-- ============ WHAT TO SAY ============ -->
   <h2>What to Say on the Whiteboard / Que decir en la pizarra</h2>
