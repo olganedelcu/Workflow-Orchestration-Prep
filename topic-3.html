@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 3: The Decision Step — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html" class="active">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 3: The Decision Step</h1>
+  <p class="subtitle">El Paso de Decision &bull; <span class="tag tag-high">High Priority</span></p>
+
+  <h2>Why It's Special / Por que es especial</h2>
+
+  <p>Every other step calls an <strong>EXTERNAL</strong> service. The decision step is <strong>YOURS</strong> — it's internal business logic that IDnow owns. It's the brain of the workflow.</p>
+  <p class="es">Todos los demas pasos llaman a un servicio EXTERNO. El paso de decision es TUYO — es logica de negocio interna que IDnow controla. Es el cerebro del workflow.</p>
+
+  <h2>What It Does / Que hace</h2>
+
+<pre><code>INPUTS (from previous steps):
+  ocr.confidence:        0.97
+  ocr.expiry:            "2028-05-15"
+  liveness.alive:        true
+  liveness.confidence:   0.95
+  face_match.score:      0.92
+  sanctions.hit:         false
+
+          |
+          v
+
+    ┌─────────────┐
+    │  DECISION    │
+    │  ENGINE      │
+    │  Apply rules │
+    └──────┬──────┘
+           |
+           v
+
+OUTPUT:
+  verdict: "APPROVED"
+  reason:  "All checks passed with high confidence"</code></pre>
+
+  <h2>The Rules / Las reglas</h2>
+
+  <p>Think of rules as a checklist evaluated top to bottom. <strong>First match wins.</strong></p>
+  <p class="es">Piensa en las reglas como una lista evaluada de arriba a abajo. La primera que coincida gana.</p>
+
+<pre><code>RULE 1 (highest priority):
+  IF sanctions.hit == true
+  THEN → REJECTED  "Sanctions match found"
+
+RULE 2:
+  IF liveness.alive == false
+  THEN → REJECTED  "Liveness check failed"
+
+RULE 3:
+  IF face_match.score &lt; 0.5
+  THEN → REJECTED  "Face does not match document"
+
+RULE 4:
+  IF face_match.score &lt; 0.8
+  THEN → MANUAL_REVIEW  "Low confidence face match"
+
+RULE 5:
+  IF ocr.confidence &lt; 0.7
+  THEN → MANUAL_REVIEW  "Document hard to read"
+
+RULE 6:
+  IF ocr.expiry &lt; today
+  THEN → REJECTED  "Document expired"
+
+DEFAULT:
+  → APPROVED  "All checks passed"</code></pre>
+
+  <h2>Hardcoded vs Configurable</h2>
+
+  <h3>Option A: Hardcoded rules in code</h3>
+<pre><code>function decide(outputs: AllStepOutputs): Decision {
+  if (outputs.sanctions.hit) return { verdict: "REJECTED", reason: "..." };
+  if (!outputs.liveness.alive) return { verdict: "REJECTED", reason: "..." };
+  if (outputs.faceMatch.score &lt; 0.5) return { verdict: "REJECTED", reason: "..." };
+  return { verdict: "APPROVED", reason: "All checks passed" };
+}</code></pre>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Simple, easy to test</td><td>Need code deploy to change rules</td></tr>
+    <tr><td>Type-safe</td><td>Product team can't change rules themselves</td></tr>
+  </table>
+
+  <h3>Option B: Configurable rules (decision table)</h3>
+<pre><code>{
+  "rules": [
+    { "condition": "sanctions.hit == true",    "verdict": "REJECTED",      "priority": 1 },
+    { "condition": "liveness.alive == false",  "verdict": "REJECTED",      "priority": 2 },
+    { "condition": "face_match.score &lt; 0.5",   "verdict": "REJECTED",      "priority": 3 },
+    { "condition": "face_match.score &lt; 0.8",   "verdict": "MANUAL_REVIEW", "priority": 4 },
+    { "condition": "ocr.confidence &lt; 0.7",     "verdict": "MANUAL_REVIEW", "priority": 5 }
+  ],
+  "default_verdict": "APPROVED"
+}</code></pre>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Change rules without deploying</td><td>More complex to implement</td></tr>
+    <tr><td>Product team can adjust thresholds</td><td>Need to validate rule syntax</td></tr>
+    <tr><td>Different rules per country/customer</td><td>Harder to test all combinations</td></tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">What to propose</div>
+    <p>"Start with hardcoded rules for v1 — simpler, testable, ship faster. But design the interface so we can swap in a configurable rules engine later. The orchestrator just calls <code>decide(allOutputs)</code> and doesn't care how the decision is made internally."</p>
+    <p class="es">"Empezar con reglas fijas para v1 — mas simple, testeable, entregar rapido. Pero disenar la interfaz para que podamos cambiar a un motor de reglas configurable despues."</p>
+  </div>
+
+  <h2>Important: Not Every Bad Result Is a Failure</h2>
+
+  <div class="callout warn">
+    <div class="label">Key insight / Punto clave</div>
+<pre><code>OCR returns confidence: 0.4    → NOT a step failure
+                                  It's a low score. Step COMPLETED.
+                                  The DECISION step handles it.
+
+OCR service returns HTTP 500   → THIS is a step failure
+                                  Retry or fail the workflow.</code></pre>
+    <p>Separate infrastructure failures from bad results. The orchestrator handles infrastructure failures. The decision step handles bad results.</p>
+    <p class="es">Separa fallos de infraestructura de malos resultados. El orquestador maneja fallos de infraestructura. El paso de decision maneja malos resultados.</p>
+  </div>
+
+  <div class="qa">
+    <div class="question">"How do you handle the business logic for the decision step?"</div>
+    <div class="answer">"I'd separate orchestration from decision logic. The orchestrator feeds all previous step outputs as inputs. The decision step evaluates rules in priority order. For v1, hardcoded. The interface is clean enough to swap in a configurable rules engine later — important if different customers or countries need different thresholds. Key insight: a low confidence score isn't a system failure — the step still completes successfully. It's the decision step's job to interpret what that score means."</div>
+    <div class="answer-es">"Separaria la orquestacion de la logica de decision. Para v1, reglas fijas. La interfaz permite cambiar a un motor configurable despues. El punto clave: un puntaje bajo no es un fallo del sistema — el paso completa exitosamente. Es trabajo del paso de decision interpretar que significa."</div>
+  </div>
+
+  <a href="topic-4.html" class="back-top">Next: Failure &amp; Retry &rarr;</a>
+
+</div>
+</body>
+</html>

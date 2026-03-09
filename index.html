@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IDnow System Design Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand active">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>IDnow System Design Interview Prep</h1>
+  <p class="subtitle">Orchestration Engine &rarr; Full Identity Verification Product</p>
+
+  <!-- ============ WHAT YOU BUILT ============ -->
+  <h2>What You Built / Lo que construiste</h2>
+
+  <p>A basic <strong>orchestration engine</strong> in TypeScript that:</p>
+  <ul>
+    <li>Runs steps in a DAG (directed acyclic graph)</li>
+    <li>Resolves dependencies (step B waits for step A)</li>
+    <li>Runs independent steps in parallel</li>
+    <li>Tracks state with a logical clock</li>
+    <li>Handles failures (failed steps block downstream steps)</li>
+  </ul>
+  <p class="es">Un motor que ejecuta pasos en orden, respetando dependencias. Si A debe terminar antes que B, el motor se asegura de eso. Si A y C son independientes, corren al mismo tiempo.</p>
+
+  <!-- ============ WHAT THEY WANT ============ -->
+  <h2>What They Want / Lo que quieren</h2>
+
+  <p>Take that basic engine and design a <strong>full product</strong> for identity verification.</p>
+  <p class="es">Tu motor basico sabe ejecutar pasos en orden. Ahora: como lo conviertes en un sistema real que verifica la identidad de una persona (como cuando abres una cuenta en Revolut)?</p>
+
+  <!-- ============ THREE ACTORS ============ -->
+  <h2>The Three Actors / Los tres actores</h2>
+
+<pre><code>SIGNER              CUSTOMER              IDnow
+(end user)          (business)            (your system)
+Persona que         Empresa que           La plataforma
+quiere verificar    necesita verificar    que orquesta
+su identidad        al usuario            todo el proceso
+
+Example/Ejemplo:
+Una persona          Revolut               IDnow
+abriendo una                               coordina OCR,
+cuenta bancaria                            face match, etc.</code></pre>
+
+  <div class="callout">
+    <div class="label">Key Insight / Punto clave</div>
+    <p>IDnow sits in the <strong>MIDDLE</strong>. Customers call your API, your orchestrator coordinates external services, and returns results to the customer.</p>
+    <p class="es">IDnow esta EN EL MEDIO. Los clientes llaman tu API, tu orquestador coordina servicios externos, y devuelve resultados al cliente.</p>
+  </div>
+
+  <!-- ============ VERIFICATION FLOW ============ -->
+  <h2>The Verification Flow / El flujo de verificacion</h2>
+
+<pre><code>Customer (Revolut) calls IDnow API
+         |
+         v
+   [Create Workflow Instance]
+   Store user data, select flow based on doc_type + country
+         |
+         v
+   User captures documents + selfie via SDK
+         |
+         v
+   ====== ORCHESTRATION BEGINS ======
+         |
+    -----+-----
+    |         |
+    v         v
+  [OCR]    [Liveness]        &lt;-- PARALLEL (no dependencies)
+    |         |
+    |--+------|
+    |  |
+    v  v
+  [Face Match]  [Sanctions]  &lt;-- PARALLEL (both have deps ready)
+    |              |
+    |------+-------|
+           |
+           v
+      [DECISION]             &lt;-- Aggregates ALL outputs
+           |
+           v
+   Return result to Customer
+   ============================</code></pre>
+
+  <p class="es">El orquestador recibe imagenes del usuario, las manda a servicios externos (OCR, liveness, face match, sanciones) en el orden correcto, recoge los resultados, y toma una decision final.</p>
+
+  <!-- ============ DAG ============ -->
+  <h2>The DAG Your Engine Runs / El DAG que ejecuta tu motor</h2>
+
+<pre><code>Clock tick 0:  OCR + Liveness          (parallel, sin dependencias)
+Clock tick 1:  Face Match + Sanctions   (parallel, dependencias listas)
+Clock tick 2:  Decision                 (espera TODOS los anteriores)</code></pre>
+
+  <div class="callout success">
+    <div class="label">Good news</div>
+    <p>This maps directly to your existing engine! The basic <code>executeWorkflow</code> already handles this topology. The interview is about everything <strong>AROUND</strong> this: data flow, persistence, failures, etc.</p>
+    <p class="es">Esto se mapea directamente a tu motor existente! La entrevista es sobre todo lo que RODEA esto.</p>
+  </div>
+
+  <!-- ============ TOPICS ============ -->
+  <h2>Topics / Temas</h2>
+
+  <div class="topic-grid">
+    <a href="topic-1.html" class="topic-card">
+      <div class="number">Topic 1</div>
+      <div class="title">Data Flow Between Steps</div>
+      <div class="title-es">Flujo de datos entre pasos</div>
+      <span class="tag tag-high">High Priority</span>
+    </a>
+    <a href="topic-2.html" class="topic-card">
+      <div class="number">Topic 2</div>
+      <div class="title">Calling External Services</div>
+      <div class="title-es">Llamando servicios externos</div>
+      <span class="tag tag-high">High Priority</span>
+    </a>
+    <a href="topic-3.html" class="topic-card">
+      <div class="number">Topic 3</div>
+      <div class="title">The Decision Step</div>
+      <div class="title-es">El paso de decision</div>
+      <span class="tag tag-high">High Priority</span>
+    </a>
+    <a href="topic-4.html" class="topic-card">
+      <div class="number">Topic 4</div>
+      <div class="title">Failure &amp; Retry</div>
+      <div class="title-es">Fallos y reintentos</div>
+      <span class="tag tag-med">Medium</span>
+    </a>
+    <a href="topic-5.html" class="topic-card">
+      <div class="number">Topic 5</div>
+      <div class="title">Persistence &amp; Recovery</div>
+      <div class="title-es">Persistencia y recuperacion</div>
+      <span class="tag tag-med">Medium</span>
+    </a>
+    <a href="topic-6.html" class="topic-card">
+      <div class="number">Topic 6</div>
+      <div class="title">Conditional Branching</div>
+      <div class="title-es">Ramas condicionales</div>
+      <span class="tag tag-med">Medium</span>
+    </a>
+    <a href="topic-7.html" class="topic-card">
+      <div class="number">Topic 7</div>
+      <div class="title">Proposals to Other Teams</div>
+      <div class="title-es">Propuestas a otros equipos</div>
+      <span class="tag tag-med">Medium</span>
+    </a>
+    <a href="topic-8.html" class="topic-card">
+      <div class="number">Topic 8</div>
+      <div class="title">Observability</div>
+      <div class="title-es">Observabilidad</div>
+      <span class="tag tag-low">Lower</span>
+    </a>
+  </div>
+
+  <!-- ============ WHITEBOARD PLAN ============ -->
+  <h2>Whiteboard Plan / Plan para la pizarra</h2>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="time">Min 0–5</div>
+      <div class="desc">Ask problem questions</div>
+      <div class="desc-es">Hacer preguntas sobre el problema</div>
+    </div>
+    <div class="timeline-item">
+      <div class="time">Min 5–10</div>
+      <div class="desc">Draw the 3 actors + sequence diagram</div>
+      <div class="desc-es">Dibujar los 3 actores + diagrama de secuencia</div>
+    </div>
+    <div class="timeline-item">
+      <div class="time">Min 10–15</div>
+      <div class="desc">Zoom into IDnow box &rarr; draw the DAG</div>
+      <div class="desc-es">Acercarse a la caja de IDnow &rarr; dibujar el DAG</div>
+    </div>
+    <div class="timeline-item">
+      <div class="time">Min 15–25</div>
+      <div class="desc">Orchestrator internals: context, executor, state store</div>
+      <div class="desc-es">Internos del orquestador: contexto, ejecutor, almacen de estado</div>
+    </div>
+    <div class="timeline-item">
+      <div class="time">Min 25–35</div>
+      <div class="desc">Data flow + decision step</div>
+      <div class="desc-es">Flujo de datos + paso de decision</div>
+    </div>
+    <div class="timeline-item">
+      <div class="time">Min 35–45</div>
+      <div class="desc">Failures, retries, persistence</div>
+      <div class="desc-es">Fallos, reintentos, persistencia</div>
+    </div>
+    <div class="timeline-item">
+      <div class="time">Min 45–55</div>
+      <div class="desc">Proposals to teams, conditional branching, observability</div>
+      <div class="desc-es">Propuestas a equipos, ramas condicionales, observabilidad</div>
+    </div>
+    <div class="timeline-item">
+      <div class="time">Min 55–60</div>
+      <div class="desc">Summarize, ask what they'd prioritize</div>
+      <div class="desc-es">Resumir, preguntar que priorizarian</div>
+    </div>
+  </div>
+
+  <!-- ============ QUESTIONS ============ -->
+  <h2>Questions to Ask First / Preguntas para hacer primero</h2>
+
+  <p>Before drawing ANYTHING, ask:</p>
+
+  <ol>
+    <li>
+      "Can you walk me through what happens today when a user verifies their identity?"
+      <p class="es">"Pueden explicarme que pasa hoy cuando un usuario verifica su identidad?"</p>
+    </li>
+    <li>
+      "What's broken or missing that made you decide to build this?"
+      <p class="es">"Que esta roto o falta que los llevo a decidir construir esto?"</p>
+    </li>
+    <li>
+      "Who triggers a verification — the end user, a backend service, or an ops person?"
+      <p class="es">"Quien inicia una verificacion — el usuario, un servicio backend, o alguien de operaciones?"</p>
+    </li>
+    <li>
+      "Do any steps require human involvement, like manual review?"
+      <p class="es">"Alguno de los pasos requiere intervencion humana, como revision manual?"</p>
+    </li>
+    <li>
+      "If the system crashes mid-verification, do we need to resume from the last step?"
+      <p class="es">"Si el sistema se cae a mitad de verificacion, necesitamos retomar desde el ultimo paso?"</p>
+    </li>
+  </ol>
+
+  <!-- ============ DIAMOND ============ -->
+  <h2>The Diamond Pattern / El patron diamante</h2>
+
+  <div class="callout warn">
+    <div class="label">They mentioned this!</div>
+    <p>The interviewer specifically said there's a diamond workflow. This is already in your engine's tests.</p>
+    <p class="es">El entrevistador especificamente dijo que hay un workflow diamante. Esto ya esta en los tests de tu motor.</p>
+  </div>
+
+<pre><code>        [OCR]─────────────────[Sanctions]
+        /    \                     |
+       /      \                    |
+ [Start]      [Face Match]────[Decision]
+       \      /                    |
+        \    /                     |
+       [Liveness]─────────────────/
+
+Diamond 1: OCR + Liveness → Face Match
+  Face Match NEEDS outputs from BOTH OCR (face crop) and Liveness (selfie frame)
+
+Diamond 2: Face Match + Sanctions → Decision
+  Decision NEEDS outputs from ALL previous steps</code></pre>
+
+  <p>This is a <strong>DOUBLE diamond</strong> — two fan-out/fan-in patterns chained together. Your engine already handles this topology. The challenge is passing data correctly through the diamonds.</p>
+  <p class="es">Es un DOBLE diamante — dos patrones fan-out/fan-in encadenados. Tu motor ya maneja esta topologia. El reto es pasar datos correctamente a traves de los diamantes.</p>
+
+  <h3>What makes diamonds tricky / Que hace los diamantes complicados</h3>
+  <ol>
+    <li>The join point (Face Match) must wait for ALL branches, not just the first one
+      <p class="es">El punto de union debe esperar TODAS las ramas, no solo la primera</p></li>
+    <li>With conditional branching, the join point must know which branches were SKIPPED vs still RUNNING
+      <p class="es">Con ramas condicionales, el punto de union debe saber cuales ramas fueron SALTADAS vs aun CORRIENDO</p></li>
+    <li>Data from BOTH branches feeds into the join point
+      <p class="es">Datos de AMBAS ramas alimentan el punto de union</p></li>
+  </ol>
+
+  <!-- ============ IDNOW CONTEXT ============ -->
+  <h2>What IDnow Does / Que hace IDnow</h2>
+
+  <p>IDnow is an identity verification platform based in Munich, Germany. They provide:</p>
+  <p class="es">IDnow es una plataforma de verificacion de identidad con base en Munich, Alemania.</p>
+
+  <ul>
+    <li><strong>AutoIdent</strong> — fully automated identity verification (no humans)
+      <br><em>Verificacion completamente automatizada (sin humanos)</em></li>
+    <li><strong>VideoIdent</strong> — video call with a trained agent who verifies your ID live
+      <br><em>Videollamada con un agente entrenado que verifica tu ID en vivo</em></li>
+    <li><strong>eSign / InstantSign</strong> — electronic document signing with identity check
+      <br><em>Firma electronica de documentos con verificacion de identidad</em></li>
+    <li><strong>eID</strong> — verification using the chip in European ID cards
+      <br><em>Verificacion usando el chip en tarjetas de identidad europeas</em></li>
+  </ul>
+
+  <p><strong>Their customers:</strong> Banks (Revolut, N26), insurance companies, telecoms, crypto exchanges — anyone who needs KYC (Know Your Customer).</p>
+  <p class="es">Sus clientes: Bancos, aseguradoras, telecomunicaciones, exchanges de crypto — cualquiera que necesite KYC.</p>
+
+  <div class="callout warn">
+    <div class="label">Regulatory context</div>
+    <p>European Anti-Money Laundering (AML) directives require identity verification. <strong>AUDIT TRAILS are not optional — they're legally required.</strong></p>
+    <p class="es">Las directivas europeas contra el lavado de dinero (AML) requieren verificacion de identidad. Las PISTAS DE AUDITORIA no son opcionales — son legalmente requeridas.</p>
+  </div>
+
+  <!-- ============ SENIOR EXPECTATIONS ============ -->
+  <h2>Senior Engineer Expectations / Expectativas para senior</h2>
+
+  <ol>
+    <li><strong>Lead the conversation</strong> — don't wait for them to tell you what to design next
+      <p class="es">Lideres la conversacion — no esperes a que te digan que disenar</p></li>
+    <li><strong>Make trade-offs explicit</strong> — "We could do X or Y. X is simpler but doesn't scale. For v1, I'd pick X because..."
+      <p class="es">Hagas los trade-offs explicitos — "Podriamos hacer X o Y. Para v1, elegiria X porque..."</p></li>
+    <li><strong>Think about other teams</strong> — you're designing a system that multiple teams interact with
+      <p class="es">Pienses en otros equipos — estas disenando un sistema con el que multiples equipos interactuan</p></li>
+    <li><strong>Ask the right questions</strong> — don't assume requirements, clarify them
+      <p class="es">Hagas las preguntas correctas — no asumas requisitos, clarifica</p></li>
+    <li><strong>Know when to stop</strong> — don't over-engineer. "For v1, we don't need this. Here's when we would."
+      <p class="es">Sepas cuando parar — no sobre-ingenieries.</p></li>
+  </ol>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 8: Observability — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html" class="active">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 8: Observability</h1>
+  <p class="subtitle">Observabilidad &bull; <span class="tag tag-low">Lower Priority</span></p>
+
+  <div class="callout">
+    <div class="label">When to bring this up</div>
+    <p>Only if you have time or they ask. But it shows maturity and production thinking.</p>
+    <p class="es">Solo si tienes tiempo o preguntan. Pero muestra madurez y pensamiento de produccion.</p>
+  </div>
+
+  <h2>Three Pillars / Tres pilares</h2>
+
+<pre><code>LOGS              METRICS             TRACES
+What happened     How much/fast       The journey of one request
+Que paso          Cuanto/rapido       El viaje de una peticion</code></pre>
+
+  <h2>1. Logs / Registros</h2>
+
+  <p>Every state transition gets logged with a correlation ID:</p>
+
+<pre><code>{ "workflow_id": "abc-123", "step": "ocr",       "event": "STARTED",   "clock": 0 }
+{ "workflow_id": "abc-123", "step": "liveness",   "event": "STARTED",   "clock": 0 }
+{ "workflow_id": "abc-123", "step": "ocr",       "event": "COMPLETED", "clock": 1, "duration_ms": 2340 }
+{ "workflow_id": "abc-123", "step": "liveness",   "event": "COMPLETED", "clock": 1, "duration_ms": 890 }
+{ "workflow_id": "abc-123", "step": "face_match", "event": "STARTED",   "clock": 2 }
+{ "workflow_id": "abc-123", "step": "sanctions",  "event": "FAILED",    "clock": 3, "error": "timeout" }
+{ "workflow_id": "abc-123", "step": "sanctions",  "event": "STARTED",   "clock": 3, "attempt": 2 }</code></pre>
+
+  <p><strong>Key: the workflow_id travels with every log line.</strong> You can filter all logs for one verification.</p>
+  <p class="es">Clave: el workflow_id viaja con cada linea de log. Puedes filtrar todos los logs para una verificacion.</p>
+
+  <h2>2. Metrics / Metricas</h2>
+
+<pre><code>WORKFLOW LEVEL:
+  workflows_started_total           (counter)
+  workflows_completed_total         (counter, by verdict)
+  workflow_duration_seconds         (histogram, p50/p95/p99)
+  workflows_active                  (gauge, currently running)
+
+STEP LEVEL:
+  step_duration_seconds             (histogram, by step_type)
+  step_failures_total               (counter, by step_type + error_code)
+  step_retries_total                (counter, by step_type)
+
+BUSINESS LEVEL:
+  verification_approved_total       (counter)
+  verification_rejected_total       (counter, by reason)
+  verification_manual_review_total  (counter)</code></pre>
+
+  <p>What this tells you:</p>
+  <ul>
+    <li>"OCR p95 latency jumped from 2s to 8s" → OCR service is degrading</li>
+    <li>"sanctions failures up 300%" → vendor might be down</li>
+    <li>"manual review rate up 50%" → thresholds need adjusting</li>
+  </ul>
+
+  <h2>3. Traces / Trazas</h2>
+
+  <p>A trace shows the full journey of ONE verification:</p>
+
+<pre><code>Workflow abc-123 [total: 4.2s]
+├── ocr          [0ms - 2340ms]    ████████░░░░░░░  completed
+├── liveness     [0ms - 890ms]     ███░░░░░░░░░░░░  completed
+├── face_match   [2340ms - 3540ms] ░░░░░░░░████░░░  completed
+├── sanctions    [2340ms - 3100ms] ░░░░░░░░███░░░░  completed
+└── decision     [3540ms - 3620ms] ░░░░░░░░░░░░██░  APPROVED</code></pre>
+
+  <p>Immediately shows: OCR is the bottleneck (2.3s out of 4.2s total).</p>
+  <p class="es">Muestra inmediatamente: OCR es el cuello de botella (2.3s de 4.2s totales).</p>
+
+  <h2>Alerting / Alertas</h2>
+
+<pre><code>ALERT: workflow_duration_p95 > 30s for 5 minutes
+  → SLA breach risk
+
+ALERT: step_failures{step="sanctions"} > 10 in 1 minute
+  → Sanctions service might be down
+
+ALERT: manual_review_rate > 40%
+  → Something is off, too many borderline cases</code></pre>
+
+  <div class="callout success">
+    <div class="label">What to propose</div>
+    <p>"Every workflow gets a correlation ID that propagates to all service calls. We log every state transition with structured JSON. For metrics, start with workflow duration and step failure rate — those are the two most actionable signals. Traces come naturally from the logical clock: we already know when each step started and finished. For v1, structured logs plus a simple dashboard is enough."</p>
+    <p class="es">"Cada workflow recibe un ID de correlacion. Registramos cada transicion de estado. Para metricas, duracion de workflow y tasa de fallos. Las trazas vienen del reloj logico. Para v1, logs estructurados mas un dashboard simple es suficiente."</p>
+  </div>
+
+  <div class="qa">
+    <div class="question">"How would you debug a verification that's stuck or slow?"</div>
+    <div class="answer">"Every workflow has a correlation ID. I'd look up the workflow state in the database — which steps completed, which is running, which are waiting. The step execution records show duration and attempt count. If a step is slow, I check logs with the correlation ID to see what the external service returned. The logical clock gives me the exact execution timeline. For systematic issues, I'd look at step-level metrics — if OCR p95 jumped, it's a service degradation, not a single-workflow problem."</div>
+    <div class="answer-es">"Cada workflow tiene un ID de correlacion. Buscaria el estado en la BD. Los registros muestran duracion y intentos. El reloj logico da la linea de tiempo exacta. Para problemas sistematicos, miraria metricas a nivel de paso."</div>
+  </div>
+
+  <a href="index.html" class="back-top">&larr; Back to Home</a>
+
+</div>
+</body>
+</html>

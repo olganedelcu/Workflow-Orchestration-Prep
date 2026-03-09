@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 4: Failure &amp; Retry — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html" class="active">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 4: Failure &amp; Retry</h1>
+  <p class="subtitle">Fallos y Reintentos &bull; <span class="tag tag-med">Medium</span></p>
+
+  <h2>Types of Failures / Tipos de fallos</h2>
+
+<pre><code>TRANSIENT (temporary, might work if you try again)
+  - Network timeout
+  - Service returns 503 (temporarily unavailable)
+  - Rate limited (too many requests)
+  → STRATEGY: Retry
+
+PERMANENT (won't work no matter how many times you try)
+  - Document image is blank
+  - Invalid document type
+  - Service returns 400 (bad request)
+  → STRATEGY: Fail the step
+
+DEGRADED (service is down for a while)
+  - Sanctions API is completely down
+  - Third-party vendor having an outage
+  → STRATEGY: Circuit breaker</code></pre>
+
+  <p class="es">TRANSITORIOS: temporales, podrian funcionar si intentas de nuevo. PERMANENTES: no funcionara sin importar cuantas veces intentes. DEGRADADOS: servicio caido por un tiempo.</p>
+
+  <h2>Retry with Exponential Backoff</h2>
+
+  <p>Don't retry immediately — wait longer each time. This gives the service time to recover.</p>
+  <p class="es">No reintentes inmediatamente — espera mas cada vez. Esto le da tiempo al servicio para recuperarse.</p>
+
+<pre><code>Attempt 1: Call OCR service → FAILS (timeout)
+  Wait 1 second
+
+Attempt 2: Call OCR service → FAILS (timeout)
+  Wait 2 seconds
+
+Attempt 3: Call OCR service → FAILS (timeout)
+  Wait 4 seconds
+
+Attempt 4: Call OCR service → SUCCESS!
+
+If all retries exhausted → mark step as FAILED
+
+Formula: wait = baseDelay * 2^attempt</code></pre>
+
+  <h2>Circuit Breaker Pattern</h2>
+
+  <p>If a service keeps failing, stop calling it. Like a fuse in your house — it breaks to protect the system.</p>
+  <p class="es">Si un servicio sigue fallando, deja de llamarlo. Como un fusible — se rompe para proteger el sistema.</p>
+
+<pre><code>CLOSED (normal)       →  OPEN (broken)        →  HALF-OPEN (testing)
+Calls go through         Calls fail instantly     One test call allowed
+                                                       |
+Too many failures →      After timeout →          If test succeeds → CLOSED</code></pre>
+
+  <div class="callout">
+    <div class="label">When to mention this</div>
+    <p>Only if the interviewer asks about cascading failures or service outages. Don't volunteer it early — it's an advanced topic.</p>
+  </div>
+
+  <h2>Per-Step Failure Strategy</h2>
+
+  <p>Not all steps should fail the same way:</p>
+
+  <table>
+    <tr><th>Step</th><th>On Failure</th><th>Why</th></tr>
+    <tr><td>OCR</td><td>FAIL WORKFLOW</td><td>Without OCR data, nothing else works</td></tr>
+    <tr><td>Liveness</td><td>FAIL WORKFLOW</td><td>Core security requirement</td></tr>
+    <tr><td>Face Match</td><td>MANUAL_REVIEW</td><td>A human can compare visually</td></tr>
+    <tr><td>Sanctions</td><td>MANUAL_REVIEW (with flag)</td><td>Can't skip compliance, but can do it later</td></tr>
+    <tr><td>Decision</td><td>FAIL WORKFLOW</td><td>Business logic errors are bugs</td></tr>
+  </table>
+
+  <h2>Idempotency / Idempotencia</h2>
+
+  <p>Calling a step twice with the same inputs should give the same result and not cause problems.</p>
+  <p class="es">Llamar a un paso dos veces con los mismos inputs debe dar el mismo resultado y no causar problemas.</p>
+
+<pre><code>IDEMPOTENT (safe to retry):
+  "Analyze this document image" → same result every time
+  "Check this name against sanctions list" → same result every time
+
+NOT IDEMPOTENT (dangerous to retry):
+  "Charge the customer $10" → retrying charges them $20!
+  "Send verification email" → retrying sends 3 emails!</code></pre>
+
+  <p>For identity verification, most steps ARE naturally idempotent (they're reading/analyzing, not writing/acting).</p>
+
+  <div class="qa">
+    <div class="question">"What if the sanctions check service is down?"</div>
+    <div class="answer">"It depends on the business requirement. Option A: retry with exponential backoff, and if all retries fail, fail the workflow — the user tries again later. Option B: mark the step as 'degraded', skip it, and route to manual review with a flag that says 'sanctions check incomplete'. I'd ask the compliance team which is acceptable. For v1, I'd go with Option A — retry and fail. It's safer and simpler."</div>
+    <div class="answer-es">"Depende del requisito de negocio. Opcion A: reintentar y fallar. Opcion B: marcar como 'degradado' y enviar a revision manual. Para v1, iria con Opcion A — es mas seguro y simple. Podemos agregar degradacion elegante despues."</div>
+  </div>
+
+  <a href="topic-5.html" class="back-top">Next: Persistence &amp; Recovery &rarr;</a>
+
+</div>
+</body>
+</html>

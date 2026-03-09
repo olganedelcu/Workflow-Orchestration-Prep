@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 5: Persistence &amp; Recovery — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html" class="active">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 5: Persistence &amp; Recovery</h1>
+  <p class="subtitle">Persistencia y Recuperacion &bull; <span class="tag tag-med">Medium</span></p>
+
+  <h2>The Problem / El problema</h2>
+
+  <p>Your current engine keeps everything in memory. If the process crashes, all running workflows are lost.</p>
+  <p class="es">Tu motor actual mantiene todo en memoria. Si el proceso se cae, todos los workflows se pierden.</p>
+
+<pre><code>Workflow running in memory:
+  Step 1: COMPLETED
+  Step 2: COMPLETED
+  Step 3: RUNNING...
+                      CRASH!
+
+After restart:
+  ??? Everything is gone</code></pre>
+
+  <h2>The Solution: Persist After Each Step</h2>
+
+<pre><code>Workflow running:
+  Step 1: COMPLETED  → save to DB
+  Step 2: COMPLETED  → save to DB
+  Step 3: RUNNING...
+                      CRASH!
+
+After restart:
+  Load from DB:
+    Step 1: COMPLETED (with outputs)
+    Step 2: COMPLETED (with outputs)
+    Step 3: WAITING   (re-run this one)
+
+  Resume from Step 3!</code></pre>
+
+  <h2>Database Schema / Esquema de base de datos</h2>
+
+<pre><code>-- The workflow instance (one per verification)
+workflow_instances:
+  id              UUID        -- "abc-123"
+  definition_id   TEXT        -- "identity_verification_v2"
+  status          TEXT        -- "RUNNING", "COMPLETED", "FAILED"
+  context_data    JSONB       -- the WorkflowContext (inputs, step outputs)
+  created_at      TIMESTAMP
+  updated_at      TIMESTAMP
+
+-- Each step execution (one per step per workflow)
+step_executions:
+  id              UUID
+  workflow_id     UUID        -- FK to workflow_instances
+  step_id         TEXT        -- "ocr", "face_match", etc.
+  status          TEXT        -- "WAITING", "RUNNING", "COMPLETED", "FAILED"
+  inputs          JSONB       -- what was sent to the service
+  outputs         JSONB       -- what the service returned
+  error           TEXT        -- error message if failed
+  attempt_number  INT         -- which retry attempt (1, 2, 3...)
+  start_clock     INT         -- from your logical clock
+  finished_clock  INT
+  started_at      TIMESTAMP
+  finished_at     TIMESTAMP</code></pre>
+
+  <h2>Why PostgreSQL / Por que PostgreSQL</h2>
+
+  <table>
+    <tr><th>Reason</th><th>Explanation</th></tr>
+    <tr><td>ACID transactions</td><td>Each step completion is atomic — never a half-written state</td></tr>
+    <tr><td>JSONB columns</td><td>Flexible step inputs/outputs without rigid schemas</td></tr>
+    <tr><td>Mature &amp; reliable</td><td>Battle-tested, huge community</td></tr>
+    <tr><td>Good enough for scale</td><td>Identity verification is not millions/second</td></tr>
+    <tr><td>Greenfield project</td><td>No existing DB to integrate with</td></tr>
+  </table>
+
+  <div class="callout warn">
+    <div class="label">Tip</div>
+    <p>Don't propose exotic databases unless they ask. PostgreSQL is the safe, correct answer for this use case.</p>
+  </div>
+
+  <h2>Event Sourcing</h2>
+
+  <p>Instead of updating rows, append events. Each state change is a new row.</p>
+  <p class="es">En vez de actualizar filas, agregar eventos. Cada cambio de estado es una nueva fila.</p>
+
+<pre><code>workflow_events:
+  id, workflow_id, event_type, step_id, payload, clock, created_at
+
+Example events:
+  { event: "WORKFLOW_CREATED", workflow_id: "abc" }
+  { event: "STEP_STARTED",    step: "ocr",        clock: 0 }
+  { event: "STEP_STARTED",    step: "liveness",   clock: 0 }
+  { event: "STEP_COMPLETED",  step: "ocr",        clock: 1, outputs: {...} }
+  { event: "STEP_COMPLETED",  step: "liveness",   clock: 1, outputs: {...} }
+  { event: "STEP_STARTED",    step: "face_match", clock: 2 }
+  ...</code></pre>
+
+  <h3>Why this matters for IDnow</h3>
+  <ol>
+    <li><strong>Audit trail for free</strong> — regulators can see exactly what happened, when, and why. You never delete or modify history.
+      <p class="es">Pista de auditoria gratis — los reguladores pueden ver exactamente que paso.</p></li>
+    <li><strong>Debugging</strong> — replay events to understand what happened in a failed verification.
+      <p class="es">Depuracion — reproduce eventos para entender que paso.</p></li>
+    <li><strong>Recovery</strong> — rebuild workflow state by replaying events.
+      <p class="es">Recuperacion — reconstruir estado reproduciendo eventos.</p></li>
+  </ol>
+
+  <div class="callout success">
+    <div class="label">What to propose</div>
+    <p>"For v1, simple CRUD — update step_executions after each step. But also insert into an events table for audit. This gives us the audit trail immediately without the full complexity of event sourcing."</p>
+    <p class="es">"Para v1, CRUD simple. Pero tambien insertar en una tabla de eventos para auditoria. Esto nos da la pista de auditoria sin la complejidad completa de event sourcing."</p>
+  </div>
+
+  <div class="qa">
+    <div class="question">"If the system crashes mid-verification, what happens?"</div>
+    <div class="answer">"After each step completes, we persist the result and outputs to the database in a transaction. On crash recovery, we load incomplete workflows, check which steps have completed, and resume from where we left off. Since steps are idempotent, re-running a step that might have partially executed is safe. The logical clock values help us maintain ordering guarantees across the recovery."</div>
+    <div class="answer-es">"Despues de cada paso, persistimos resultado y outputs en la BD. Al recuperarnos, cargamos workflows incompletos, verificamos que pasos completaron, y retomamos. Como los pasos son idempotentes, re-ejecutar es seguro. El reloj logico mantiene garantias de ordenamiento."</div>
+  </div>
+
+  <a href="topic-6.html" class="back-top">Next: Conditional Branching &rarr;</a>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 1: Data Flow — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html" class="active">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 1: Data Flow Between Steps</h1>
+  <p class="subtitle">Flujo de Datos entre Pasos &bull; <span class="tag tag-high">High Priority</span></p>
+
+  <!-- ============ PROBLEM ============ -->
+  <h2>The Problem / El problema</h2>
+
+  <p>Your current engine runs steps but passes <strong>NOTHING</strong> between them. In reality:</p>
+  <ul>
+    <li>OCR extracts a face crop from the document</li>
+    <li>Face Match needs that face crop + the selfie from Liveness</li>
+    <li>Sanctions Check needs the name + DOB from OCR</li>
+    <li>Decision needs ALL outputs from ALL steps</li>
+  </ul>
+  <p class="es">Tu motor actual ejecuta pasos pero NO PASA NADA entre ellos. En realidad cada paso necesita datos de los pasos anteriores.</p>
+
+  <!-- ============ SOLUTION ============ -->
+  <h2>The Solution: Workflow Context / Contexto del Workflow</h2>
+
+  <p>Think of it as a <strong>shared bag</strong> where each step puts its results, and the next step can reach in and grab what it needs.</p>
+  <p class="es">Piensalo como una bolsa compartida donde cada paso deja sus resultados, y el siguiente paso puede buscar lo que necesita.</p>
+
+<pre><code>WorkflowContext = {
+  workflowId: "abc-123",
+
+  // Initial inputs (what the customer sent)
+  inputs: {
+    doc_front_uri: "s3://bucket/doc-front.jpg",
+    doc_back_uri:  "s3://bucket/doc-back.jpg",
+    selfie_uri:    "s3://bucket/selfie.jpg",
+    country:       "DE",
+    doc_type:      "passport"
+  },
+
+  // Each step writes its results here
+  stepOutputs: {
+    "ocr": {
+      name: "Jane Doe",
+      date_of_birth: "1990-01-01",
+      document_number: "X1234567",
+      expiry: "2028-05-15",
+      face_crop_uri: "s3://bucket/face-crop.jpg",
+      confidence: 0.97
+    },
+    "liveness": {
+      alive: true,
+      selfie_frame_uri: "s3://bucket/selfie-frame.jpg",
+      confidence: 0.95
+    },
+    "face_match": {
+      match_score: 0.92,
+      confidence: 0.88
+    },
+    "sanctions": {
+      hit: false,
+      details: null
+    }
+  }
+}</code></pre>
+
+  <!-- ============ HOW STEPS GET INPUTS ============ -->
+  <h2>How Steps Get Their Inputs / Como obtienen sus inputs</h2>
+
+  <p>Each step declares what it needs. The orchestrator resolves it from the context <strong>BEFORE</strong> calling the service.</p>
+  <p class="es">Cada paso declara lo que necesita. El orquestador lo resuelve del contexto ANTES de llamar al servicio.</p>
+
+<pre><code>Step definition:
+  id: "face_match"
+  depends_on: ["ocr", "liveness"]
+  input_mapping:
+    face_image:   "stepOutputs.ocr.face_crop_uri"
+    selfie_image: "stepOutputs.liveness.selfie_frame_uri"</code></pre>
+
+  <p>What the orchestrator does:</p>
+
+<pre><code>1. Face Match is ready (OCR and Liveness both COMPLETED)
+
+2. Orchestrator reads the input_mapping
+
+3. Resolves values from context:
+     face_image   = context.stepOutputs["ocr"].face_crop_uri
+     selfie_image = context.stepOutputs["liveness"].selfie_frame_uri
+
+4. Calls the Face Match service with those inputs
+
+5. Stores the response in context.stepOutputs["face_match"]</code></pre>
+
+  <!-- ============ WHERE DATA LIVES ============ -->
+  <h2>Where Does the Data Live? / Donde viven los datos?</h2>
+
+  <table>
+    <tr>
+      <th>Type / Tipo</th>
+      <th>Example / Ejemplo</th>
+      <th>Where / Donde</th>
+      <th>Why / Por que</th>
+    </tr>
+    <tr>
+      <td><strong>Large files</strong></td>
+      <td>Images, videos</td>
+      <td>Object Storage (S3)</td>
+      <td>Too big for DB</td>
+    </tr>
+    <tr>
+      <td><strong>Small data</strong></td>
+      <td>Scores, names, flags</td>
+      <td>Workflow Context (DB)</td>
+      <td>Fast to read, needs persistence</td>
+    </tr>
+  </table>
+
+  <p>Steps always pass <strong>references</strong> (URIs) for large data, never the data itself.</p>
+  <p class="es">Los pasos siempre pasan referencias (URIs) para datos grandes, nunca los datos en si.</p>
+
+<pre><code>GOOD:  { face_crop_uri: "s3://bucket/face-crop.jpg" }    &lt;-- reference
+BAD:   { face_crop: "&lt;10MB of binary image data&gt;" }       &lt;-- actual data</code></pre>
+
+  <!-- ============ TRADE-OFF ============ -->
+  <h2>Trade-off: Where to Store Context</h2>
+
+  <table>
+    <tr><th>Option</th><th>Pros</th><th>Cons</th></tr>
+    <tr><td><strong>In-memory only</strong></td><td>Fast</td><td>Lost on crash</td></tr>
+    <tr><td><strong>Database after each step</strong></td><td>Durable, resumable</td><td>Adds ~5ms per step</td></tr>
+    <tr><td><strong>Database at end only</strong></td><td>Simple</td><td>Can't resume mid-workflow</td></tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">What to propose</div>
+    <p>Database after each step. The 5ms overhead is negligible compared to OCR taking seconds. And you get crash recovery for free.</p>
+    <p class="es">Base de datos despues de cada paso. Los 5ms son insignificantes comparados con el OCR que toma segundos. Y obtienes recuperacion de fallos gratis.</p>
+  </div>
+
+  <!-- ============ Q&A ============ -->
+  <div class="qa">
+    <div class="question">"How does the face match step get the data it needs from both OCR and liveness?"</div>
+    <div class="answer">"Each step writes its outputs to the workflow context. When face match is ready to run, the orchestrator resolves its input mapping — it looks up <code>ocr.face_crop_uri</code> and <code>liveness.selfie_frame_uri</code> from the context and passes them as inputs to the face match service. For large data like images, steps write to object storage and the context only stores URIs."</div>
+    <div class="answer-es">"Cada paso escribe sus outputs en el contexto del workflow. Cuando face match esta listo, el orquestador resuelve su mapeo de inputs — busca ocr.face_crop_uri y liveness.selfie_frame_uri del contexto y los pasa como inputs al servicio. Para datos grandes como imagenes, los pasos escriben en object storage y el contexto solo guarda URIs."</div>
+  </div>
+
+  <a href="topic-2.html" class="back-top">Next: Calling External Services &rarr;</a>
+
+</div>
+</body>
+</html>

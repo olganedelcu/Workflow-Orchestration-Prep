@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 2: External Services — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html" class="active">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 2: Calling External Services</h1>
+  <p class="subtitle">Llamando Servicios Externos &bull; <span class="tag tag-high">High Priority</span></p>
+
+  <h2>The Problem / El problema</h2>
+
+  <p>Your current engine calls <code>simulateStepExecution()</code> — a fake function. In reality, each step calls a real external service over the network. The network is unreliable. Services are slow. Things break.</p>
+  <p class="es">Tu motor actual llama a una funcion falsa. En realidad, cada paso llama a un servicio externo real por la red. La red no es confiable. Los servicios son lentos. Las cosas se rompen.</p>
+
+  <h2>Three Patterns / Tres patrones</h2>
+
+  <h3>Pattern 1: Synchronous HTTP (Simple)</h3>
+
+<pre><code>Orchestrator                    OCR Service
+     |                              |
+     |---- POST /analyze ---------->|
+     |         (waits...)           |
+     |         (waits...)           |
+     |&lt;--- 200 OK + results --------|
+     |                              |
+     |  Now orchestrator continues</code></pre>
+
+  <p>The orchestrator sends a request and <strong>WAITS</strong> for the response. Like calling someone on the phone and staying on the line.</p>
+  <p class="es">El orquestador envia una peticion y ESPERA la respuesta. Como llamar a alguien por telefono y quedarse en la linea.</p>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Simple to implement</td><td>Orchestrator is blocked waiting</td></tr>
+    <tr><td>Easy to debug</td><td>If service takes 30s, you wait 30s</td></tr>
+    <tr><td>No extra infrastructure</td><td>Can't handle many concurrent workflows</td></tr>
+  </table>
+
+  <h3>Pattern 2: Async with Callback (Medium)</h3>
+
+<pre><code>Orchestrator                    OCR Service
+     |                              |
+     |---- POST /analyze ---------->|
+     |&lt;--- 202 Accepted ------------|  (immediate "got it")
+     |                              |
+     |  (orchestrator is FREE       |
+     |   to do other work)          |
+     |                              |  (service processes...)
+     |                              |
+     |&lt;--- POST /callback ---------|  (service calls back when done)
+     |     {results}                |</code></pre>
+
+  <p>Like sending a text message — you don't wait for a reply.</p>
+  <p class="es">Como enviar un mensaje de texto — no esperas la respuesta.</p>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Orchestrator not blocked</td><td>What if callback never arrives?</td></tr>
+    <tr><td>Handles slow services well</td><td>More complex</td></tr>
+    <tr><td>Scalable</td><td>Need to match callback to workflow</td></tr>
+  </table>
+
+  <h3>Pattern 3: Message Queue (Most decoupled)</h3>
+
+<pre><code>Orchestrator         Queue              OCR Worker
+     |                 |                    |
+     |-- publish ----&gt;|                    |
+     |  {analyze this} |                    |
+     |                 |--- deliver -------&gt;|
+     |                 |                    | (processes...)
+     |                 |&lt;-- publish result -|
+     |&lt;-- consume -----|                    |
+     |  {results}      |                    |</code></pre>
+
+  <p>Like leaving a letter in a mailbox.</p>
+  <p class="es">Como dejar una carta en un buzon.</p>
+
+  <table>
+    <tr><th>Pros</th><th>Cons</th></tr>
+    <tr><td>Fully decoupled</td><td>More infrastructure (need a queue)</td></tr>
+    <tr><td>Built-in retry</td><td>Harder to debug</td></tr>
+    <tr><td>Handles backpressure</td><td>Added latency</td></tr>
+    <tr><td>If worker crashes, message stays in queue</td><td></td></tr>
+  </table>
+
+  <h2>What to Propose / Que proponer</h2>
+
+  <div class="callout success">
+    <div class="label">Your answer</div>
+    <p>"I'd start with <strong>synchronous HTTP with timeouts</strong>. It's the simplest approach and good enough for a greenfield project. Each step call: send request, wait up to N seconds, handle response or timeout. If a specific service proves slow or unreliable, we migrate that ONE integration to async without changing the whole system."</p>
+    <p class="es">"Empezaria con HTTP sincrono con timeouts. Es el enfoque mas simple y suficiente para un proyecto greenfield. Si un servicio resulta lento, migramos ESA integracion a asincrono sin cambiar todo el sistema."</p>
+  </div>
+
+  <p><strong>Why this is a good answer:</strong> It shows you don't over-engineer. You pick the simplest thing that works and evolve when needed.</p>
+  <p class="es">Muestra que no sobre-ingenierias. Eliges lo mas simple que funciona y evolucionas cuando es necesario.</p>
+
+  <h2>Timeout Handling / Manejo de timeouts</h2>
+
+<pre><code>Request sent ──────── 10s timeout ──────── ?
+                          |
+                  ┌───────┴────────┐
+                  |                |
+            Response arrives    No response
+            before timeout      TIMEOUT
+                  |                |
+                  v                v
+             Continue          Retry? Fail?</code></pre>
+
+  <p>Use <code>Promise.race</code>:</p>
+
+<pre><code>const result = await Promise.race([
+  httpCall(serviceUrl, inputs),     // the actual call
+  timeout(10000)                    // 10 second bomb
+]);
+// Whichever finishes first wins</code></pre>
+
+  <div class="qa">
+    <div class="question">"What if the OCR service takes 10 seconds sometimes and 100ms other times?"</div>
+    <div class="answer">"I'd use sync HTTP with a generous timeout — say 15 seconds for OCR. The orchestrator already runs independent steps in parallel, so while OCR is slow, Liveness runs at the same time. If OCR consistently exceeds the timeout, I'd add retry logic for that specific step. If the problem persists, that's when I'd consider moving OCR to async with a callback, but only for that one service."</div>
+    <div class="answer-es">"Usaria HTTP sincrono con un timeout generoso — digamos 15 segundos para OCR. El orquestador ya ejecuta pasos independientes en paralelo. Si OCR consistentemente excede el timeout, agregaria logica de reintento. Si persiste, ahi consideraria mover OCR a asincrono, pero solo ese servicio."</div>
+  </div>
+
+  <a href="topic-3.html" class="back-top">Next: The Decision Step &rarr;</a>
+
+</div>
+</body>
+</html>

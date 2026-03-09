@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 7: Proposals to Other Teams — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html" class="active">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 7: Proposals to Other Teams</h1>
+  <p class="subtitle">Propuestas a Otros Equipos &bull; <span class="tag tag-med">Medium</span></p>
+
+  <h2>Why This Matters / Por que importa</h2>
+
+  <p>They told you: <em>"it also involves making proposals to other teams."</em> You need to define HOW other teams' services integrate with the orchestrator. This is about <strong>contracts and interfaces</strong>.</p>
+  <p class="es">Te dijeron que tambien implica propuestas a otros equipos. Necesitas definir COMO se integran. Esto es sobre contratos e interfaces.</p>
+
+  <h2>The Standard Step Interface</h2>
+
+  <p>Every external service should follow the <strong>SAME</strong> interface. This makes the orchestrator simple — no special code per service.</p>
+  <p class="es">Cada servicio debe seguir la MISMA interfaz. Asi el orquestador es simple — sin codigo especial por servicio.</p>
+
+<pre><code>REQUEST (what the orchestrator sends):
+
+POST /execute
+{
+  "workflow_id": "abc-123",
+  "step_id": "ocr",
+  "attempt": 1,
+  "inputs": {
+    "document_image": "s3://bucket/doc.jpg",
+    "country": "DE",
+    "document_type": "passport"
+  }
+}
+
+
+RESPONSE (what the service returns):
+
+{
+  "status": "completed",
+  "outputs": {
+    "name": "Jane Doe",
+    "date_of_birth": "1990-01-01",
+    "confidence": 0.97,
+    "face_crop_uri": "s3://bucket/face.jpg"
+  },
+  "error": null
+}</code></pre>
+
+  <h2>What to Propose to Each Team</h2>
+
+  <h3>To the OCR Team</h3>
+  <ul>
+    <li>Accept a document image URI and return extracted fields</li>
+    <li>Include a confidence score (0-1) for each field</li>
+    <li>Extract and store the face crop separately (needed for face matching)</li>
+    <li>Return structured errors: retryable vs permanent</li>
+    <li>Be idempotent — same image in = same result out</li>
+  </ul>
+
+  <h3>To the Biometrics Team (Liveness + Face Match)</h3>
+  <ul>
+    <li><strong>Two separate endpoints</strong>: Liveness and Face Match</li>
+    <li>Liveness: accepts selfie/video, returns alive=bool + confidence + best frame URI</li>
+    <li>Face Match: accepts two face images, returns match_score (0-1)</li>
+  </ul>
+
+  <div class="callout">
+    <div class="label">Why separate?</div>
+    <p>The orchestrator runs liveness in parallel with OCR. Face match runs AFTER both. If they're one service, you lose that parallelism.</p>
+    <p class="es">El orquestador ejecuta liveness en paralelo con OCR. Face match corre DESPUES. Si son un servicio, pierdes el paralelismo.</p>
+  </div>
+
+  <h3>To the Compliance Team (Sanctions)</h3>
+  <ul>
+    <li>Accept name + date of birth + nationality</li>
+    <li>Return hit=bool + match details</li>
+    <li>Support async for checks &gt;5s (return 202 + callback)</li>
+    <li>Include a 'requires_manual_review' flag for fuzzy matches</li>
+  </ul>
+
+  <h2>Error Contract / Contrato de errores</h2>
+
+  <p>Every service should return errors in the <strong>same format</strong>:</p>
+
+<pre><code>{
+  "status": "failed",
+  "error": {
+    "code": "DOCUMENT_UNREADABLE",
+    "message": "Could not extract text from document image",
+    "retryable": false,
+    "category": "permanent"
+  }
+}
+
+Error categories:
+  "transient"  → orchestrator should retry
+  "permanent"  → don't retry, step has failed
+  "degraded"   → service partially worked, results incomplete</code></pre>
+
+  <p><strong>Without a standard error contract</strong>, the orchestrator needs custom error handling per service. <strong>With it</strong>, the retry logic is generic.</p>
+  <p class="es">Sin un contrato estandar, necesitas manejo personalizado por servicio. Con el, la logica de reintento es generica.</p>
+
+  <h2>Monorepo Structure / Estructura del monorepo</h2>
+
+  <p>They mentioned a monorepo. Propose a package structure:</p>
+
+<pre><code>packages/
+  workflow-engine/          ← core DAG executor (what you built)
+  workflow-api/             ← REST API for customers
+  workflow-persistence/     ← database layer
+  workflow-dashboard/       ← ops UI for monitoring
+  step-contracts/           ← shared types for step interface
+                              (OTHER teams import this package)
+  decision-engine/          ← business logic for decisions</code></pre>
+
+  <div class="callout success">
+    <div class="label">Key insight</div>
+    <p>The <code>step-contracts</code> package is shared with other teams. When you change the contract, everyone updates together because it's a monorepo — no version mismatch issues.</p>
+    <p class="es">El paquete step-contracts se comparte. Cuando cambias el contrato, todos actualizan juntos porque es un monorepo.</p>
+  </div>
+
+  <div class="qa">
+    <div class="question">"How would you ensure other teams' services integrate cleanly?"</div>
+    <div class="answer">"I'd define a standard step interface — a shared contract that every service must follow. Request: workflow ID, step ID, inputs. Response: status, outputs, structured error. The contract lives in a shared package in the monorepo. This means the orchestrator doesn't need service-specific code. The retry logic, timeout handling, and data passing are all generic. If a new service doesn't follow the contract, it's a conversation, not a code change in the orchestrator."</div>
+    <div class="answer-es">"Definiria una interfaz estandar — un contrato compartido en el monorepo. El orquestador no necesita codigo especifico por servicio. Si un nuevo servicio no sigue el contrato, es una conversacion, no un cambio de codigo."</div>
+  </div>
+
+  <a href="topic-8.html" class="back-top">Next: Observability &rarr;</a>
+
+</div>
+</body>
+</html>

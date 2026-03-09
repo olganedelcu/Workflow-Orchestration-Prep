@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 6: Conditional Branching — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html" class="active">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 6: Conditional Branching</h1>
+  <p class="subtitle">Ramas Condicionales &bull; <span class="tag tag-med">Medium</span></p>
+
+  <h2>The Problem / El problema</h2>
+
+  <p>Your current engine has a <strong>FIXED</strong> DAG — every step always runs (unless a dependency fails). In reality, verification flows need to take <strong>DIFFERENT PATHS</strong> based on results.</p>
+  <p class="es">Tu motor actual tiene un DAG FIJO. En realidad, los flujos necesitan tomar CAMINOS DIFERENTES basados en resultados.</p>
+
+  <p>Remember the IDnow InstantSign diagram:</p>
+
+<pre><code>Check ID validity
+       |
+  ┌────┴─────┐
+  |          |
+ID VALID   ID NOT VALID
+  |          |
+  v          v
+ Sign     Full verification
+           (VideoIdent/eID)
+            then Sign</code></pre>
+
+  <p>The path depends on the <strong>RESULT</strong> of the ID check. Your engine can't do this yet.</p>
+
+  <h2>The Solution: Guard Conditions on Edges</h2>
+
+<pre><code>BEFORE (your current engine):
+  step: { id: "check_id", next: ["sign", "full_verification"] }
+  // BOTH always execute
+
+AFTER (with conditions):
+  step: {
+    id: "check_id",
+    next: [
+      { stepId: "sign",              when: "output.id_valid == true"  },
+      { stepId: "full_verification", when: "output.id_valid == false" }
+    ]
+  }
+  // Only ONE executes based on the condition</code></pre>
+
+  <h2>How It Works in the Orchestrator</h2>
+
+<pre><code>1. Step "check_id" completes with output: { id_valid: true }
+
+2. Orchestrator looks at its "next" edges
+
+3. Evaluates each condition:
+     "output.id_valid == true"  → TRUE  → "sign" is ACTIVATED
+     "output.id_valid == false" → FALSE → "full_verification" is SKIPPED
+
+4. Only activated steps become eligible to run
+
+5. Skipped steps are marked as "SKIPPED" (new status!)</code></pre>
+
+  <h2>The Diamond Pattern with Conditions</h2>
+
+  <div class="callout warn">
+    <div class="label">They mentioned diamonds!</div>
+    <p>The interviewer specifically mentioned a diamond workflow pattern.</p>
+  </div>
+
+<pre><code>SIMPLE DIAMOND (no conditions, what your engine already does):
+
+        A
+       / \
+      B   C     ← both always run in parallel
+       \ /
+        D       ← waits for BOTH B and C
+
+CONDITIONAL DIAMOND:
+
+        A
+       / \
+      B   C     ← only one runs, based on A's output
+       \ /
+        D       ← waits for whichever branch was ACTIVATED</code></pre>
+
+  <p><strong>The challenge:</strong> D depends on B and C, but only ONE ran. How does D know it's ready?</p>
+  <p class="es">El reto: D depende de B y C, pero solo UNO corrio. Como sabe D que esta listo?</p>
+
+  <div class="callout success">
+    <div class="label">Solution</div>
+<pre><code>BEFORE: step ready if ALL dependencies are COMPLETED
+AFTER:  step ready if all dependencies are COMPLETED or SKIPPED</code></pre>
+  </div>
+
+  <h2>New Step Status: SKIPPED</h2>
+
+<pre><code>Current engine: WAITING → RUNNING → COMPLETED
+                                  → FAILED
+
+With branching: WAITING → RUNNING → COMPLETED
+                                  → FAILED
+                WAITING → SKIPPED  (condition was false)</code></pre>
+
+  <h2>Real IDnow Example</h2>
+
+  <p>Different countries require different verification methods:</p>
+
+<pre><code>workflow: identity_verification
+steps:
+  - id: document_capture
+    next:
+      - stepId: ocr
+        when: "always"
+
+  - id: ocr
+    next:
+      - stepId: video_ident
+        when: "country in ['DE','AT'] AND ocr.confidence &lt; 0.8"
+      - stepId: auto_ident
+        when: "country in ['DE','AT'] AND ocr.confidence >= 0.8"
+      - stepId: eid_check
+        when: "country in ['FR','ES']"
+
+  - id: video_ident     # agent-assisted video call
+    next: [decision]
+
+  - id: auto_ident      # fully automated
+    next: [decision]
+
+  - id: eid_check       # electronic ID
+    next: [decision]
+
+  - id: decision
+    # waits for whichever verification method was activated</code></pre>
+
+  <div class="qa">
+    <div class="question">"How would you handle different verification flows for different countries?"</div>
+    <div class="answer">"Two levels. First, different workflow definitions per product or region — Germany might use a different DAG than France. Second, conditional branching within a workflow — based on OCR confidence, the flow might take the automated path or route to video verification. The orchestrator supports both: it selects the right workflow definition at creation time, and evaluates conditions at runtime as steps complete."</div>
+    <div class="answer-es">"Dos niveles. Primero, diferentes definiciones de workflow por region. Segundo, ramas condicionales dentro del workflow. El orquestador soporta ambos: selecciona la definicion correcta al crear, y evalua condiciones en tiempo de ejecucion."</div>
+  </div>
+
+  <a href="topic-7.html" class="back-top">Next: Proposals to Other Teams &rarr;</a>
+
+</div>
+</body>
+</html>
