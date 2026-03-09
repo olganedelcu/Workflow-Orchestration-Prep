@@ -314,6 +314,124 @@ td { background: var(--bg); }
   font-size: 0.9rem;
 }
 
+/* ---- Data store diagrams ---- */
+.store-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+.store-box {
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.store-box .store-header {
+  padding: 0.8rem 1.2rem;
+  font-weight: 700;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.store-box .store-header .store-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.store-box .store-header .store-sub {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.store-box.s3 {
+  border-color: var(--orange);
+}
+.store-box.s3 .store-header {
+  background: rgba(210,153,34,0.12);
+  color: var(--orange);
+}
+.store-box.pg {
+  border-color: var(--accent);
+}
+.store-box.pg .store-header {
+  background: rgba(88,166,255,0.12);
+  color: var(--accent);
+}
+.store-box .store-body {
+  padding: 1rem 1.2rem;
+  background: var(--surface);
+}
+.store-box .store-body p {
+  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
+}
+.store-box .store-body ul {
+  margin-bottom: 0.8rem;
+  padding-left: 1.2rem;
+}
+.store-box .store-body li {
+  font-size: 0.85rem;
+  margin-bottom: 0.2rem;
+}
+.store-box .store-path {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}
+.store-box .store-path strong {
+  color: var(--text);
+}
+.store-box .store-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15em 0.5em;
+  border-radius: 4px;
+  background: rgba(63,185,80,0.15);
+  color: var(--green);
+  margin-top: 0.6rem;
+}
+.db-table {
+  margin-bottom: 1rem;
+}
+.db-table .db-table-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+  padding-left: 0.2rem;
+}
+.db-table table {
+  font-size: 0.8rem;
+  margin-bottom: 0.4rem;
+}
+.db-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.4rem 0.6rem;
+}
+.db-table td {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.6rem;
+}
+.db-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 0.6rem;
+}
+@media (max-width: 900px) {
+  .store-grid { grid-template-columns: 1fr; }
+}
+
 /* ---- Back to top ---- */
 .back-top {
   display: inline-block;

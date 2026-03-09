@@ -605,61 +605,86 @@ La forma correcta (lo que hacemos):
   <p>Two stores. Simple rule: <strong>binary files → S3, everything else → PostgreSQL.</strong></p>
   <p class="es">Dos almacenes. Regla simple: <strong>archivos binarios → S3, todo lo demas → PostgreSQL.</strong></p>
 
-<pre><code>┌──────────────────────────────────────────────────────────────────────┐
-│                        S3 OBJECT STORAGE                             │
-│                     (archivos binarios / binary files)               │
-│                                                                      │
-│  What lives here:                    Why here and not in the DB:     │
-│  • Document photos (front, back)     • Too large (1-10MB each)      │
-│  • Selfie photos                     • Not queryable — just stored   │
-│  • Video recordings                  • Services read directly by URI │
-│  • Face crop (extracted by OCR)      • Cheap storage at scale        │
-│  • Best frame (from liveness)        • Can use CDN for fast access   │
-│                                                                      │
-│  Organized as: s3://bucket/{workflow_id}/{step_id}/{filename}        │
-│  Example:      s3://bucket/abc-123/ocr/face-crop.jpg                 │
-│                                                                      │
-│  All buckets in EU region (eIDAS / GDPR)                             │
-└──────────────────────────────────────────────────────────────────────┘
+  <div class="store-grid">
 
-┌──────────────────────────────────────────────────────────────────────┐
-│                          POSTGRESQL                                  │
-│                    (datos estructurados / structured data)            │
-│                                                                      │
-│  TABLE: workflow_instances                                            │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ id (UUID) │ status    │ verdict  │ context_data │ created_at  │  │
-│  │ abc-123   │ COMPLETED │ APPROVED │ {inputs,     │ 2024-01-15  │  │
-│  │           │           │          │  outputs}    │  10:30:00   │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  TABLE: step_executions                                              │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ workflow_id │ step_id   │ status    │ outputs (JSONB)          │  │
-│  │ abc-123     │ ocr       │ COMPLETED │ {name:"Jane",conf:0.97, │  │
-│  │             │           │           │  face_crop:"s3://..."}   │  │
-│  │ abc-123     │ liveness  │ COMPLETED │ {alive:true,             │  │
-│  │             │           │           │  best_frame:"s3://..."}  │  │
-│  │ abc-123     │ face_match│ COMPLETED │ {match_score:0.94}       │  │
-│  │ abc-123     │ sanctions │ COMPLETED │ {hit:false}              │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  TABLE: workflow_events (append-only audit log)                      │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ workflow_id │ event_type       │ step_id  │ clock │ timestamp  │  │
-│  │ abc-123     │ WORKFLOW_CREATED │ null     │ 0     │ 10:30:00   │  │
-│  │ abc-123     │ STEP_COMPLETED   │ ocr      │ 0     │ 10:30:04   │  │
-│  │ abc-123     │ STEP_COMPLETED   │ liveness │ 0     │ 10:30:03   │  │
-│  │ abc-123     │ STEP_COMPLETED   │ face_m.  │ 1     │ 10:30:06   │  │
-│  │ abc-123     │ STEP_COMPLETED   │ sanctions│ 1     │ 10:30:07   │  │
-│  │ abc-123     │ WORKFLOW_COMPLETED│ null     │ 2     │ 10:30:07   │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  Note: outputs JSONB contains S3 URIs — never the actual files.      │
-│  Nota: outputs JSONB contiene URIs de S3 — nunca los archivos.       │
-│                                                                      │
-│  All databases in EU region (eIDAS / GDPR)                           │
-└──────────────────────────────────────────────────────────────────────┘</code></pre>
+    <!-- S3 BOX -->
+    <div class="store-box s3">
+      <div class="store-header">
+        <span class="store-icon">&#128230;</span> S3 Object Storage
+        <span class="store-sub">binary files / archivos binarios</span>
+      </div>
+      <div class="store-body">
+        <p><strong>What lives here:</strong></p>
+        <ul>
+          <li>Document photos (front, back)</li>
+          <li>Selfie photos</li>
+          <li>Video recordings</li>
+          <li>Face crop (extracted by OCR)</li>
+          <li>Best frame (from liveness)</li>
+        </ul>
+        <p><strong>Why here and not in the DB:</strong></p>
+        <ul>
+          <li>Too large (1-10MB each)</li>
+          <li>Not queryable — just stored &amp; retrieved</li>
+          <li>Services read directly by URI</li>
+          <li>Cheap storage at scale</li>
+          <li>Can use CDN for fast access</li>
+        </ul>
+        <div class="store-path">
+          <strong>Path:</strong> s3://bucket/{workflow_id}/{step_id}/{filename}<br>
+          <strong>Example:</strong> s3://bucket/abc-123/ocr/face-crop.jpg
+        </div>
+        <div class="store-badge">EU Region (eIDAS / GDPR)</div>
+      </div>
+    </div>
+
+    <!-- POSTGRESQL BOX -->
+    <div class="store-box pg">
+      <div class="store-header">
+        <span class="store-icon">&#128451;</span> PostgreSQL
+        <span class="store-sub">structured data / datos estructurados</span>
+      </div>
+      <div class="store-body">
+
+        <div class="db-table">
+          <div class="db-table-name">workflow_instances</div>
+          <table>
+            <tr><th>id (UUID)</th><th>status</th><th>verdict</th><th>context_data</th><th>created_at</th></tr>
+            <tr><td>abc-123</td><td>COMPLETED</td><td>APPROVED</td><td>{inputs, outputs}</td><td>2024-01-15 10:30</td></tr>
+          </table>
+        </div>
+
+        <div class="db-table">
+          <div class="db-table-name">step_executions</div>
+          <table>
+            <tr><th>workflow_id</th><th>step_id</th><th>status</th><th>outputs (JSONB)</th></tr>
+            <tr><td>abc-123</td><td>ocr</td><td>COMPLETED</td><td>{name:"Jane", conf:0.97, face_crop:"s3://..."}</td></tr>
+            <tr><td>abc-123</td><td>liveness</td><td>COMPLETED</td><td>{alive:true, best_frame:"s3://..."}</td></tr>
+            <tr><td>abc-123</td><td>face_match</td><td>COMPLETED</td><td>{match_score:0.94}</td></tr>
+            <tr><td>abc-123</td><td>sanctions</td><td>COMPLETED</td><td>{hit:false}</td></tr>
+          </table>
+        </div>
+
+        <div class="db-table">
+          <div class="db-table-name">workflow_events <span style="font-weight:400; color: var(--text-muted);">(append-only audit log)</span></div>
+          <table>
+            <tr><th>workflow_id</th><th>event_type</th><th>step_id</th><th>clock</th><th>timestamp</th></tr>
+            <tr><td>abc-123</td><td>WORKFLOW_CREATED</td><td>null</td><td>0</td><td>10:30:00</td></tr>
+            <tr><td>abc-123</td><td>STEP_COMPLETED</td><td>ocr</td><td>0</td><td>10:30:04</td></tr>
+            <tr><td>abc-123</td><td>STEP_COMPLETED</td><td>liveness</td><td>0</td><td>10:30:03</td></tr>
+            <tr><td>abc-123</td><td>STEP_COMPLETED</td><td>face_match</td><td>1</td><td>10:30:06</td></tr>
+            <tr><td>abc-123</td><td>STEP_COMPLETED</td><td>sanctions</td><td>1</td><td>10:30:07</td></tr>
+            <tr><td>abc-123</td><td>WORKFLOW_COMPLETED</td><td>null</td><td>2</td><td>10:30:07</td></tr>
+          </table>
+        </div>
+
+        <p class="db-note">outputs JSONB contains S3 URIs — never the actual files.<br>
+        outputs JSONB contiene URIs de S3 — nunca los archivos.</p>
+        <div class="store-badge">EU Region (eIDAS / GDPR)</div>
+      </div>
+    </div>
+
+  </div>
 
   <div class="callout">
     <div class="label">When does the DB get written? / Cuando se escribe en la BD?</div>
