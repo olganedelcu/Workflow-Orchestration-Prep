@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topic 10: Webhook Event Details — Interview Prep</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="brand">Home</a>
+    <a href="architecture.html">Architecture</a>
+    <a href="topic-1.html">Data Flow</a>
+    <a href="topic-2.html">Services</a>
+    <a href="topic-3.html">Decision</a>
+    <a href="topic-4.html">Failures</a>
+    <a href="topic-5.html">Persistence</a>
+    <a href="topic-6.html">Branching</a>
+    <a href="topic-7.html">Proposals</a>
+    <a href="topic-8.html">Observability</a>
+    <a href="topic-9.html">HTTP &amp; Comms</a>
+    <a href="topic-10.html" class="active">Events</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <h1>Topic 10: Webhook Event Details</h1>
+  <p class="subtitle">Detalles de Eventos Webhook &bull; <span class="tag tag-high">High Priority</span></p>
+
+  <div class="callout">
+    <div class="label">What this page covers / Que cubre esta pagina</div>
+    <p>This is the <strong>real-world webhook contract</strong> — the exact format of events your platform sends to customers when something happens. This is what Revolut, Deutsche Bank, etc. receive at their <code>callback_url</code>.</p>
+    <p class="es">Este es el <strong>contrato real del webhook</strong> — el formato exacto de los eventos que tu plataforma manda a los clientes cuando algo pasa. Esto es lo que Revolut, Deutsche Bank, etc. reciben en su <code>callback_url</code>.</p>
+  </div>
+
+  <div class="callout warn">
+    <div class="label">Remember / Recuerda</div>
+    <p>A webhook is just: <strong>"when something happens on MY side, I send a POST to YOUR URL"</strong>. The customer gives us their URL. We call it when events happen. See <a href="architecture.html">Architecture</a> for the callback_url explanation.</p>
+    <p class="es">Un webhook es solo: <strong>"cuando algo pasa en MI lado, mando un POST a TU URL"</strong>. El cliente nos da su URL. Nosotros la llamamos cuando pasan eventos.</p>
+  </div>
+
+  <!-- ============ HOW WEBHOOKS WORK ============ -->
+  <h2>How Webhook Delivery Works / Como funciona el envio de webhooks</h2>
+
+<pre><code>YOUR PLATFORM                              CUSTOMER'S SERVER
+(IDnow)                                    (e.g. Revolut)
+    │                                           │
+    │  Something happens:                       │
+    │  user verified, updated, etc.             │
+    │                                           │
+    │── POST https://api.revolut.com/webhooks ─▶│
+    │   Headers:                                │
+    │     Content-Type: application/json        │
+    │     x-unizo-event-type: user:created      │  ← what happened
+    │     x-unizo-webhook-id: whk_abc123        │  ← which webhook config
+    │     x-unizo-delivery-id: del_xyz789       │  ← unique per delivery (idempotency)
+    │     x-unizo-signature: sha256=a1b2c3...   │  ← proof it's from us
+    │   Body:                                   │
+    │     { type, version, user, integration }  │
+    │                                           │
+    │◀── 200 OK ────────────────────────────────│
+    │                                           │</code></pre>
+
+  <h3>The Headers Explained / Los headers explicados</h3>
+
+  <table>
+    <tr><th>Header</th><th>Type</th><th>Required</th><th>What it does / Que hace</th></tr>
+    <tr>
+      <td><code>Content-Type</code></td>
+      <td>string</td>
+      <td>Yes</td>
+      <td>Always <code>application/json</code></td>
+    </tr>
+    <tr>
+      <td><code>x-unizo-event-type</code></td>
+      <td>string</td>
+      <td>Yes</td>
+      <td>What happened: <code>user:created</code>, <code>user:updated</code>, <code>user:deleted</code></td>
+    </tr>
+    <tr>
+      <td><code>x-unizo-webhook-id</code></td>
+      <td>string</td>
+      <td>Yes</td>
+      <td>Which webhook configuration this delivery belongs to. The customer might have multiple webhooks configured.</td>
+    </tr>
+    <tr>
+      <td><code>x-unizo-delivery-id</code></td>
+      <td>string</td>
+      <td>Yes</td>
+      <td>Unique per delivery. The customer uses this for <strong>idempotency</strong> — if they receive the same <code>delivery-id</code> twice, they know it's a retry and can skip processing it again.</td>
+    </tr>
+    <tr>
+      <td><code>x-unizo-signature</code></td>
+      <td>string</td>
+      <td>Yes</td>
+      <td>HMAC SHA-256 signature. Proves the webhook really came from us and wasn't tampered with. The customer verifies it using the <strong>webhook secret</strong> we gave them during onboarding.</td>
+    </tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">Why the signature matters / Por que importa la firma</div>
+    <p>Without the signature, anyone could send a fake POST to Revolut's webhook URL saying "user verified = APPROVED". The HMAC signature proves it came from YOUR platform. Same concept as the JWT signature — cryptographic proof of authenticity.</p>
+    <p class="es">Sin la firma, cualquiera podria mandar un POST falso diciendo "usuario verificado". La firma HMAC prueba que vino de TU plataforma. Mismo concepto que la firma JWT — prueba criptografica de autenticidad.</p>
+  </div>
+
+  <!-- ============ EVENT: USER CREATED ============ -->
+  <h2>Event: User Created</h2>
+  <p class="subtitle"><code>user:created</code> &mdash; Triggered when a new user account is created in the identity system</p>
+
+  <p><strong>Method:</strong> <code>POST</code></p>
+  <p><strong>URL:</strong> <code>https://api.yourapp.com/webhooks/unizo/identity</code> (the customer's endpoint)</p>
+
+  <h3>Request Body Schema</h3>
+
+  <table>
+    <tr><th>Property</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>type</code></td><td>string</td><td>Yes</td><td>Event type identifier: <code>"user:created"</code></td></tr>
+    <tr><td><code>version</code></td><td>string</td><td>Yes</td><td>Webhook payload version: <code>"1.0.0"</code></td></tr>
+    <tr><td><code>user.id</code></td><td>string</td><td>Yes</td><td>Unique user identifier</td></tr>
+    <tr><td><code>user.email</code></td><td>string</td><td>Yes</td><td>User's email address</td></tr>
+    <tr><td><code>user.username</code></td><td>string</td><td>No</td><td>User's username</td></tr>
+    <tr><td><code>user.firstName</code></td><td>string</td><td>Yes</td><td>User's first name</td></tr>
+    <tr><td><code>user.lastName</code></td><td>string</td><td>Yes</td><td>User's last name</td></tr>
+    <tr><td><code>user.status</code></td><td>string</td><td>Yes</td><td>User status: <code>active</code>, <code>pending</code>, <code>suspended</code></td></tr>
+    <tr><td><code>user.createdDateTime</code></td><td>string</td><td>Yes</td><td>ISO 8601 timestamp</td></tr>
+    <tr><td><code>user.createdBy</code></td><td>object</td><td>No</td><td>User who created this account</td></tr>
+    <tr><td><code>integration</code></td><td>object</td><td>Yes</td><td>Integration details (type, id, name, provider)</td></tr>
+  </table>
+
+  <h3>Example Payload</h3>
+
+<pre><code>{
+  "type": "user:created",
+  "version": "1.0.0",
+  "user": {
+    "id": "user-123456",
+    "email": "john.doe@example.com",
+    "username": "john.doe",
+    "firstName": "John",
+    "lastName": "Doe",
+    "status": "active",
+    "createdDateTime": "2024-01-15T14:00:00Z",
+    "createdBy": {
+      "id": "admin-789",
+      "email": "admin@example.com"
+    }
+  },
+  "integration": {
+    "type": "IDENTITY",
+    "id": "int_123456",
+    "name": "Okta Production",
+    "provider": "okta"
+  }
+}</code></pre>
+
+  <h3>Response Codes</h3>
+
+  <table>
+    <tr><th>Code</th><th>Meaning</th></tr>
+    <tr><td><code>200 OK</code></td><td>Webhook processed successfully</td></tr>
+    <tr><td><code>400 Bad Request</code></td><td>Invalid webhook payload</td></tr>
+    <tr><td><code>401 Unauthorized</code></td><td>Invalid or missing signature</td></tr>
+  </table>
+
+  <!-- ============ EVENT: USER UPDATED ============ -->
+  <h2>Event: User Updated</h2>
+  <p class="subtitle"><code>user:updated</code> &mdash; Triggered when user profile information is modified</p>
+
+  <p><strong>Method:</strong> <code>POST</code></p>
+  <p><strong>URL:</strong> <code>https://api.yourapp.com/webhooks/unizo/identity</code></p>
+
+  <h3>Request Body Schema</h3>
+
+  <table>
+    <tr><th>Property</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>type</code></td><td>string</td><td>Yes</td><td>Event type identifier: <code>"user:updated"</code></td></tr>
+    <tr><td><code>version</code></td><td>string</td><td>Yes</td><td>Webhook payload version</td></tr>
+    <tr><td><code>user.id</code></td><td>string</td><td>Yes</td><td>Unique user identifier</td></tr>
+    <tr><td><code>user.email</code></td><td>string</td><td>Yes</td><td>User's email address</td></tr>
+    <tr><td><code>user.changes</code></td><td>object</td><td>Yes</td><td>Object containing changed fields with <code>from</code> and <code>to</code> values</td></tr>
+    <tr><td><code>user.updatedDateTime</code></td><td>string</td><td>Yes</td><td>ISO 8601 timestamp</td></tr>
+    <tr><td><code>user.updatedBy</code></td><td>object</td><td>No</td><td>User who made the update</td></tr>
+    <tr><td><code>integration</code></td><td>object</td><td>Yes</td><td>Integration details</td></tr>
+  </table>
+
+  <div class="callout">
+    <div class="label">The changes object / El objeto changes</div>
+    <p>Notice that <code>user.changes</code> shows <strong>what changed</strong> with <code>from</code> and <code>to</code> values. This is important — the customer can see exactly what was modified without having to compare with their previous state.</p>
+    <p class="es">El objeto <code>changes</code> muestra <strong>que cambio</strong> con valores <code>from</code> y <code>to</code>. El cliente ve exactamente que se modifico sin tener que comparar con su estado anterior.</p>
+  </div>
+
+  <h3>Example Payload</h3>
+
+<pre><code>{
+  "type": "user:updated",
+  "version": "1.0.0",
+  "user": {
+    "id": "user-123456",
+    "email": "john.doe@example.com",
+    "changes": {
+      "lastName": {
+        "from": "Doe",
+        "to": "Smith"
+      },
+      "department": {
+        "from": "Engineering",
+        "to": "Product"
+      }
+    },
+    "updatedDateTime": "2024-01-15T15:00:00Z",
+    "updatedBy": {
+      "id": "admin-789",
+      "email": "admin@example.com"
+    }
+  },
+  "integration": {
+    "type": "IDENTITY",
+    "id": "int_123456",
+    "name": "Okta Production",
+    "provider": "okta"
+  }
+}</code></pre>
+
+  <h3>Response Codes</h3>
+
+  <table>
+    <tr><th>Code</th><th>Meaning</th></tr>
+    <tr><td><code>200 OK</code></td><td>Webhook processed successfully</td></tr>
+    <tr><td><code>400 Bad Request</code></td><td>Invalid webhook payload</td></tr>
+    <tr><td><code>401 Unauthorized</code></td><td>Invalid or missing signature</td></tr>
+  </table>
+
+  <!-- ============ EVENT: USER DELETED ============ -->
+  <h2>Event: User Deleted</h2>
+  <p class="subtitle"><code>user:deleted</code> &mdash; Triggered when a user account is deleted or deactivated</p>
+
+  <p><strong>Method:</strong> <code>POST</code></p>
+  <p><strong>URL:</strong> <code>https://api.yourapp.com/webhooks/unizo/identity</code></p>
+
+  <h3>Request Body Schema</h3>
+
+  <table>
+    <tr><th>Property</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>type</code></td><td>string</td><td>Yes</td><td>Event type identifier: <code>"user:deleted"</code></td></tr>
+    <tr><td><code>version</code></td><td>string</td><td>Yes</td><td>Webhook payload version</td></tr>
+    <tr><td><code>user.id</code></td><td>string</td><td>Yes</td><td>Unique user identifier</td></tr>
+    <tr><td><code>user.email</code></td><td>string</td><td>Yes</td><td>User's email address</td></tr>
+    <tr><td><code>user.deletedDateTime</code></td><td>string</td><td>Yes</td><td>ISO 8601 timestamp</td></tr>
+    <tr><td><code>user.deletedBy</code></td><td>object</td><td>No</td><td>User who deleted this account</td></tr>
+    <tr><td><code>integration</code></td><td>object</td><td>Yes</td><td>Integration details</td></tr>
+  </table>
+
+  <h3>Example Payload</h3>
+
+<pre><code>{
+  "type": "user:deleted",
+  "version": "1.0.0",
+  "user": {
+    "id": "user-123456",
+    "email": "john.doe@example.com",
+    "deletedDateTime": "2024-01-15T16:00:00Z",
+    "deletedBy": {
+      "id": "admin-789",
+      "email": "admin@example.com"
+    }
+  },
+  "integration": {
+    "type": "IDENTITY",
+    "id": "int_123456",
+    "name": "Okta Production",
+    "provider": "okta"
+  }
+}</code></pre>
+
+  <h3>Response Codes</h3>
+
+  <table>
+    <tr><th>Code</th><th>Meaning</th></tr>
+    <tr><td><code>200 OK</code></td><td>Webhook processed successfully</td></tr>
+    <tr><td><code>400 Bad Request</code></td><td>Invalid webhook payload</td></tr>
+    <tr><td><code>401 Unauthorized</code></td><td>Invalid or missing signature</td></tr>
+  </table>
+
+  <!-- ============ DELIVERY & RETRIES ============ -->
+  <h2>Webhook Delivery &amp; Retries</h2>
+  <p class="subtitle">Reintentos de entrega &mdash; que pasa cuando el webhook falla</p>
+
+  <p>If the customer's server is down or returns an error, we don't just give up. We retry with increasing delays:</p>
+  <p class="es">Si el servidor del cliente esta caido o devuelve un error, no nos rendimos. Reintentamos con retrasos crecientes:</p>
+
+<pre><code>RETRY SCHEDULE:
+───────────────
+  Initial delivery:  Immediate        (right when the event happens)
+  1st retry:         After 1 minute
+  2nd retry:         After 5 minutes
+  3rd retry:         After 15 minutes
+  Final retry:       After 1 hour
+
+  Total: 5 attempts over ~1 hour 21 minutes
+
+  CRONOGRAMA DE REINTENTOS:
+  Entrega inicial:   Inmediata
+  1er reintento:     Despues de 1 minuto
+  2do reintento:     Despues de 5 minutos
+  3er reintento:     Despues de 15 minutos
+  Ultimo reintento:  Despues de 1 hora</code></pre>
+
+  <p>A webhook delivery is considered <strong>failed</strong> if:</p>
+
+  <table>
+    <tr><th>Failure condition</th><th>What it means / Que significa</th></tr>
+    <tr><td>Non-2xx status code</td><td>Customer's server returned an error (400, 500, etc.)</td></tr>
+    <tr><td>Connection timeout (30s)</td><td>Customer's server didn't respond within 30 seconds</td></tr>
+    <tr><td>SSL/TLS errors</td><td>Certificate problems on the customer's side</td></tr>
+  </table>
+
+  <div class="callout warn">
+    <div class="label">This is OUR retry (platform → customer), not service retry</div>
+    <p>Don't confuse this with the retry logic in <a href="topic-4.html">Topic 4: Failures</a>. That topic covers retrying calls to external services (OCR, liveness). THIS retry is about delivering the final result to the customer's webhook URL. Different problem, same pattern (exponential backoff).</p>
+    <p class="es">No confundas esto con los reintentos del <a href="topic-4.html">Topic 4</a>. Ese topic cubre reintentos a servicios externos (OCR, liveness). ESTE reintento es sobre entregar el resultado final al webhook del cliente. Problema diferente, mismo patron (backoff exponencial).</p>
+  </div>
+
+  <!-- ============ BEST PRACTICES ============ -->
+  <h2>Best Practices for Webhook Consumers</h2>
+  <p class="subtitle">Mejores practicas para los que reciben webhooks &mdash; what we recommend to our customers</p>
+
+  <p>These are recommendations we give to customers integrating with our webhooks. In an interview, mentioning these shows you think about the <strong>consumer side</strong>, not just the producer.</p>
+  <p class="es">Estas son recomendaciones que damos a los clientes. En una entrevista, mencionarlas muestra que piensas en el <strong>lado del consumidor</strong>, no solo del productor.</p>
+
+  <!-- BEST PRACTICE 1 -->
+  <h3>1. Idempotency / Idempotencia</h3>
+
+  <p>The same webhook might be delivered twice (network glitch, retry). The customer must handle duplicates safely using the <code>x-unizo-delivery-id</code> header.</p>
+  <p class="es">El mismo webhook puede entregarse dos veces (fallo de red, reintento). El cliente debe manejar duplicados usando el header <code>x-unizo-delivery-id</code>.</p>
+
+<pre><code>// Idempotent webhook handler — customer's code
+async function handleWebhook(request) {
+  const deliveryId = request.headers['x-unizo-delivery-id'];
+
+  // Check if already processed
+  // Verificar si ya se proceso
+  if (await isProcessed(deliveryId)) {
+    return { status: 200, message: 'Already processed' };
+  }
+
+  // Process webhook
+  await processWebhook(request.body);
+
+  // Mark as processed
+  // Marcar como procesado
+  await markProcessed(deliveryId);
+
+  return { status: 200 };
+}</code></pre>
+
+  <div class="callout success">
+    <div class="label">Why this matters / Por que importa</div>
+    <p>Imagine we send <code>user:created</code> and the customer's server processes it but crashes before returning 200. We think it failed, so we retry. Without idempotency, the customer creates the user TWICE. With the <code>delivery-id</code> check, the second delivery is safely ignored.</p>
+    <p class="es">Imagina que mandamos <code>user:created</code> y el servidor del cliente lo procesa pero se cae antes de devolver 200. Nosotros creemos que fallo y reintentamos. Sin idempotencia, el cliente crea el usuario DOS VECES. Con el check de <code>delivery-id</code>, la segunda entrega se ignora.</p>
+  </div>
+
+  <!-- BEST PRACTICE 2 -->
+  <h3>2. Async Processing / Procesamiento asincrono</h3>
+
+  <p>The customer should return 200 immediately and process the webhook in the background. Don't do heavy work inside the handler — we might timeout waiting.</p>
+  <p class="es">El cliente debe devolver 200 inmediatamente y procesar el webhook en segundo plano. No hagas trabajo pesado dentro del handler.</p>
+
+<pre><code>// Asynchronous processing — customer's code
+app.post('/webhooks/identity', (req, res) => {
+  // Step 1: Validate signature (fast)
+  if (!verifySignature(req)) {
+    return res.status(401).send('Invalid signature');
+  }
+
+  // Step 2: Queue for background processing (fast)
+  identityQueue.add(req.body);
+
+  // Step 3: Return immediately (fast)
+  // The actual work happens in the queue worker
+  res.status(200).send('OK');
+});</code></pre>
+
+  <div class="callout">
+    <div class="label">The same pattern we use / El mismo patron que usamos nosotros</div>
+    <p>Notice this is the exact same pattern as our <code>POST /verifications</code> → <code>202 Accepted</code>. Return fast, process in the background. The pattern repeats at every level of the system.</p>
+    <p class="es">Es el mismo patron que nuestro <code>POST /verifications</code> → <code>202 Accepted</code>. Devolver rapido, procesar en segundo plano. El patron se repite en cada nivel del sistema.</p>
+  </div>
+
+  <!-- BEST PRACTICE 3 -->
+  <h3>3. Error Handling / Manejo de errores</h3>
+
+  <p>Handle unknown event types gracefully. We might add new events in the future — the customer's code shouldn't crash.</p>
+  <p class="es">Manejar tipos de eventos desconocidos. Podemos agregar nuevos eventos en el futuro — el codigo del cliente no deberia fallar.</p>
+
+<pre><code>// Comprehensive error handling — customer's code
+async function processWebhook(payload) {
+  try {
+    switch (payload.type) {
+      case 'user:created':
+        await handleUserCreated(payload);
+        break;
+      case 'user:updated':
+        await handleUserUpdated(payload);
+        break;
+      case 'user:deleted':
+        await handleUserDeleted(payload);
+        break;
+      default:
+        // DON'T crash on unknown types — just log it
+        // NO fallar con tipos desconocidos — solo registrarlo
+        logger.warn(`Unknown webhook type: ${payload.type}`);
+    }
+  } catch (error) {
+    logger.error('Webhook processing failed', {
+      error: error.message,
+      payload,
+      stack: error.stack
+    });
+    throw error;  // Will trigger our retry
+  }
+}</code></pre>
+
+  <!-- ============ HOW IT MAPS TO OUR ARCHITECTURE ============ -->
+  <h2>How This Maps to Our Architecture / Como se mapea a nuestra arquitectura</h2>
+
+<pre><code>OUR VERIFICATION WEBHOOK (what we actually send):
+──────────────────────────────────────────────────
+  When a verification completes, we POST to the customer's callback_url:
+
+  POST https://api.revolut.com/webhook/identity
+  Headers:
+    Content-Type: application/json
+    x-unizo-event-type: verification:completed
+    x-unizo-webhook-id: whk_revolut_prod_001
+    x-unizo-delivery-id: del_abc123_attempt1      ← for idempotency
+    x-unizo-signature: sha256=9f2e8a...            ← HMAC proof
+  Body:
+    {
+      "type": "verification:completed",
+      "version": "1.0.0",
+      "verification": {
+        "id": "abc-123",
+        "verdict": "APPROVED",
+        "extractedData": {
+          "firstName": "Jane",
+          "lastName": "Doe",
+          "DOB": "1990-01-01"
+        },
+        "details": {
+          "ocrConfidence": 0.97,
+          "faceMatchScore": 0.94,
+          "livenessAlive": true,
+          "sanctionsHit": false
+        },
+        "completedDateTime": "2024-01-15T10:30:07Z"
+      },
+      "integration": {
+        "type": "IDENTITY_VERIFICATION",
+        "id": "int_revolut_prod",
+        "name": "Revolut Production",
+        "provider": "idnow"
+      }
+    }
+
+  Where this fits in the flow:
+  Donde encaja en el flujo:
+
+  POST /verifications → 202 → [OCR, Liveness, Face Match, Sanctions]
+  → Decision: APPROVED → POST callback_url (THIS webhook) → Revolut receives it
+                                    ▲
+                                    │
+                              YOU ARE HERE</code></pre>
+
+  <!-- ============ INTERVIEW Q&A ============ -->
+  <div class="qa">
+    <div class="question">"How do you notify the customer when a verification is complete?"</div>
+    <div class="answer">"We use webhooks. When the customer creates a verification, they provide a callback_url. When the workflow completes, we POST the result to that URL with a standard event format — event type, version, payload, and an HMAC signature so they can verify it's really from us. We include a unique delivery ID for idempotency, and we retry with exponential backoff if delivery fails — up to 5 attempts over about an hour. We also recommend customers process webhooks asynchronously: validate the signature, queue the event, return 200 immediately."</div>
+    <div class="answer-es">"Usamos webhooks. Cuando el cliente crea una verificacion, da un callback_url. Cuando el workflow termina, mandamos un POST con el resultado — tipo de evento, version, payload, y una firma HMAC para que verifiquen que es de nosotros. Incluimos un delivery ID unico para idempotencia, y reintentamos con backoff exponencial si falla — hasta 5 intentos en una hora. Recomendamos a los clientes procesar webhooks de forma asincrona: validar firma, encolar el evento, devolver 200 inmediatamente."</div>
+  </div>
+
+  <div class="qa">
+    <div class="question">"What if the customer's webhook endpoint is down?"</div>
+    <div class="answer">"We retry with increasing delays: immediately, then 1 minute, 5 minutes, 15 minutes, and finally 1 hour. After all retries are exhausted, we mark the delivery as failed and the customer can query the result via GET /verifications/:id. The verification result is always stored in our database regardless of webhook delivery status — the webhook is a convenience, not the only way to get the result."</div>
+    <div class="answer-es">"Reintentamos con retrasos crecientes: inmediato, luego 1 min, 5 min, 15 min, y 1 hora. Despues de agotar los reintentos, marcamos la entrega como fallida y el cliente puede consultar el resultado via GET /verifications/:id. El resultado siempre esta en nuestra base de datos — el webhook es una conveniencia, no la unica forma de obtener el resultado."</div>
+  </div>
+
+  <a href="architecture.html" class="back-top">&larr; Back to Architecture</a>
+
+</div>
+</body>
+</html>
