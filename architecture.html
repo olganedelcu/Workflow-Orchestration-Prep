@@ -504,6 +504,168 @@
   Customer        API Gateway     Orchestrator     PostgreSQL       S3              Services
 </code></pre>
 
+  <!-- ============ WHY SEPARATE LINES IN THE DIAGRAM ============ -->
+  <h2>Why Are POST, Auth, and Create Workflow Separate Lines?</h2>
+  <p class="subtitle">Por que son lineas separadas en el diagrama</p>
+
+  <p>The customer sends <strong>ONE</strong> HTTP request. But inside the platform, it triggers <strong>multiple internal steps</strong>. Each line in the diagram is a separate responsibility handled by a separate component:</p>
+  <p class="es">El cliente manda <strong>UNA</strong> peticion HTTP. Pero dentro de la plataforma, se disparan <strong>multiples pasos internos</strong>. Cada linea en el diagrama es una responsabilidad separada:</p>
+
+<pre><code>Customer                API Gateway              Orchestrator         PostgreSQL
+   │                        │                        │                    │
+   │── POST /verifications ▶│                        │                    │
+   │   {country, images,    │                        │                    │
+   │    callback_url}       │                        │                    │
+   │                        │                        │                    │
+   │                   ┌────┴────┐                   │                    │
+   │                   │ 1. AUTH │                    │                    │
+   │                   │         │                    │                    │
+   │                   │ Extract Bearer token         │                    │
+   │                   │ Validate JWT signature       │                    │
+   │                   │ Check expiration             │                    │
+   │                   │ Extract customer_id          │                    │
+   │                   │ Check rate limit             │                    │
+   │                   └────┬────┘                   │                    │
+   │                        │                        │                    │
+   │                        │── "Create workflow ───▶│                    │
+   │                        │    for customer         │                    │
+   │                        │    bank-prod"           │                    │
+   │                        │                        │── INSERT ─────────▶│
+   │                        │                        │   workflow_instances│
+   │                        │                        │◀── OK ────────────│
+   │                        │◀── {id: "abc-123"} ───│                    │
+   │                        │                        │                    │
+   │◀── 202 Accepted ──────│                        │                    │
+   │    {verification_id:   │                        │                    │
+   │     "abc-123"}         │                        │                    │
+
+  The customer doesn't see the internal steps.
+  They send ONE request and get ONE response.
+  But inside:
+
+  • API Gateway handles AUTH — it doesn't know about workflows
+    El API Gateway maneja AUTH — no sabe de workflows
+
+  • Orchestrator handles WORKFLOW CREATION — it doesn't know about JWT tokens
+    El Orquestador crea WORKFLOWS — no sabe de tokens JWT
+
+  • PostgreSQL handles PERSISTENCE — it just stores data
+    PostgreSQL maneja PERSISTENCIA — solo guarda datos
+
+  Separation of concerns. Each component does ONE job.
+  Separacion de responsabilidades. Cada componente hace UNA cosa.</code></pre>
+
+  <p>In code, it looks roughly like this:</p>
+  <p class="es">En codigo, se ve mas o menos asi:</p>
+
+<pre><code>// Inside API Gateway handler
+async function handlePostVerifications(req, res) {
+  // STEP 1: Auth (the gateway's job)
+  const customer = await validateJWT(req.headers.authorization);
+  checkRateLimit(customer.id);
+
+  // STEP 2: Forward to orchestrator (different service)
+  const workflow = await orchestrator.createWorkflow({
+    customer_id: customer.id,
+    country: req.body.country,
+    images: req.body.images,
+    callback_url: req.body.callback_url
+  });
+
+  // STEP 3: Respond immediately
+  res.status(202).json({ verification_id: workflow.id });
+
+  // The orchestrator now runs the DAG asynchronously
+}</code></pre>
+
+  <!-- ============ CALLBACK URL EXPLAINED ============ -->
+  <h2>What Is the callback_url? / Que es el callback_url?</h2>
+  <p class="subtitle">El patron webhook — como el cliente recibe el resultado</p>
+
+  <p>La verificacion tarda <strong>15-30 segundos</strong> (OCR, liveness, face match, sanctions). El cliente NO puede quedarse esperando con la conexion HTTP abierta.</p>
+
+<pre><code>EL PROBLEMA (sin callback):
+────────────────────────────
+  Deutsche Bank ── POST /verifications ──▶ Tu plataforma
+
+  Deutsche Bank espera... 5s... 10s... 20s... 30s...
+
+  Tu plataforma ──▶ 200 {verdict: "APPROVED"}
+
+  ESTO ES MALO:
+  - Los load balancers cortan conexiones largas (30s max)
+  - El servidor del banco esta bloqueado sin hacer nada
+  - Si la conexion se cae en el segundo 25, el banco
+    no recibe nada aunque el trabajo ya se hizo
+
+
+LA SOLUCION (con callback):
+───────────────────────────
+  Deutsche Bank te dice: "cuando termines, avisame AQUI"
+
+  POST /verifications
+  {
+    country: "DE",
+    images: { ... },
+    callback_url: "https://api.deutschebank.com/webhook/identity"
+    ───────────────────────────────────────────────────────────
+    "Esta es MI URL. Cuando tengas el resultado,
+     manda un POST a esta direccion."
+  }
+
+  Tu plataforma responde INMEDIATAMENTE:
+  202 Accepted { verification_id: "abc-123" }
+
+  Deutsche Bank ya no esta esperando. Conexion cerrada.
+  Su servidor sigue trabajando normalmente.
+
+  ... 20 segundos despues, tu plataforma termina ...
+
+  TU PLATAFORMA hace un POST al callback_url de ellos:
+
+  POST https://api.deutschebank.com/webhook/identity
+  {
+    verification_id: "abc-123",
+    verdict: "APPROVED",
+    extracted_data: {
+      name: "Jane Doe",
+      DOB: "1990-01-01"
+    }
+  }
+
+  El servidor de Deutsche Bank recibe esto y:
+  → Actualiza su base de datos
+  → Activa la cuenta del usuario
+  → Le manda un email: "Tu cuenta esta verificada"</code></pre>
+
+  <div class="callout">
+    <div class="label">Analogia / Analogy</div>
+<pre><code>ES COMO PEDIR COMIDA A DOMICILIO:
+
+  SIN callback (sincrono):
+    Llamas al restaurante → te quedas en la linea
+    esperando 30 minutos hasta que la comida esta lista
+    → "Ya esta, aqui tienes"
+    Estuviste 30 minutos sin poder hacer nada.
+
+  CON callback (asincrono):
+    Llamas al restaurante: "Aqui mi pedido, y mi
+    direccion es Calle 5 #23"  ← esto es el callback_url
+    → "Recibido" (202 Accepted)
+    → Cuelgas. Haces otras cosas.
+    → 30 minutos despues, tocan tu puerta con la comida.
+
+    El callback_url es tu direccion.
+    Tu plataforma es el repartidor que toca la puerta
+    cuando el resultado esta listo.</code></pre>
+  </div>
+
+  <div class="callout success">
+    <div class="label">Why send callback_url per request? / Por que mandarlo en cada request?</div>
+    <p>Se puede hacer de las dos formas. En la practica, muchos clientes tienen ambas: una URL <strong>por defecto</strong> configurada en su cuenta (para no mandarla cada vez), y un <strong>override</strong> por request — porque a veces quieren mandar diferentes tipos de verificacion a diferentes endpoints de su lado, o tienen URLs distintas para staging vs produccion.</p>
+    <p>Both are valid. A default webhook URL in the customer's account settings, plus a per-request override via <code>callback_url</code> in the body.</p>
+  </div>
+
   <!-- ============ HOW IMAGES TRAVEL ============ -->
   <h2>How Images Travel Through the Network</h2>
   <p class="subtitle">Como viajan las imagenes por la red — this is critical to understand</p>
@@ -695,6 +857,56 @@ La forma correcta (lo que hacemos):
       <li><strong>Each write is a transaction</strong> — never a half-written state</li>
     </ol>
     <p class="es">1. Workflow creado → INSERT. 2. Despues de cada clock tick → UPDATE + INSERT eventos. 3. Decision tomada → UPDATE + INSERT. 4. Cada escritura es una transaccion atomica.</p>
+  </div>
+
+  <!-- ============ WHY WORKFLOW EVENTS ============ -->
+  <h2>Why Do We Need workflow_events? / Para que necesitamos workflow_events?</h2>
+  <p class="subtitle">La diferencia entre estado actual e historial completo</p>
+
+  <p><code>workflow_instances</code> y <code>workflow_events</code> son dos tablas con propositos MUY diferentes:</p>
+
+<pre><code>workflow_instances (ESTADO ACTUAL)
+──────────────────────────────────
+  Te dice: "¿como esta el workflow AHORA MISMO?"
+
+  id        │ status      │ verdict
+  abc-123   │ COMPLETED   │ APPROVED      ← se ACTUALIZA (UPDATE)
+
+  Solo sabes el estado final.
+  No sabes que paso antes, ni cuando, ni en que orden.
+
+
+workflow_events (HISTORIAL COMPLETO — append-only)
+──────────────────────────────────────────────────
+  Te dice: "¿que paso, cuando, y en que orden?"
+
+  workflow_id │ event_type        │ step_id    │ clock │ timestamp
+  abc-123     │ WORKFLOW_CREATED  │ null       │ 0     │ 10:30:00
+  abc-123     │ STEP_STARTED      │ ocr        │ 0     │ 10:30:00
+  abc-123     │ STEP_STARTED      │ liveness   │ 0     │ 10:30:00
+  abc-123     │ STEP_COMPLETED    │ ocr        │ 0     │ 10:30:04
+  abc-123     │ STEP_COMPLETED    │ liveness   │ 0     │ 10:30:03
+  abc-123     │ STEP_STARTED      │ face_match │ 1     │ 10:30:04
+  abc-123     │ STEP_COMPLETED    │ face_match │ 1     │ 10:30:06
+  abc-123     │ WORKFLOW_COMPLETED│ null       │ 2     │ 10:30:07
+
+  NUNCA se actualiza. Solo INSERT. Append-only.
+  Cada fila es un hecho que paso. No se puede borrar ni cambiar.</code></pre>
+
+  <div class="callout warn">
+    <div class="label">¿Para que sirve? / What is it for?</div>
+    <ol>
+      <li><strong>Compliance legal (eIDAS, AMLR)</strong> — La ley europea dice: tienes que poder demostrar EXACTAMENTE que pasos se ejecutaron, cuando, y que resultados dieron. Si un regulador pregunta "¿por que aprobaron a esta persona?", necesitas el historial completo. No basta con "status: APPROVED".</li>
+      <li><strong>Debugging</strong> — Un workflow fallo. Con <code>workflow_instances</code> solo ves "status: FAILED". Con <code>workflow_events</code> ves: "OCR completo en 4s, liveness empezo, liveness fallo a los 3s con timeout". Sabes exactamente donde se rompio.</li>
+      <li><strong>Analytics</strong> — "¿Cuanto tarda el paso de OCR en promedio?" "¿Cuantos workflows van a manual review?" Todo sale de los eventos.</li>
+      <li><strong>SSE (actualizaciones en tiempo real al SDK)</strong> — Cuando el SDK esta esperando con SSE abierto, ¿de donde salen los mensajes "Analyzing document...", "Checking identity..."? De los eventos. Cada INSERT en <code>workflow_events</code> puede disparar un mensaje SSE al cliente.</li>
+    </ol>
+  </div>
+
+  <div class="qa">
+    <div class="question">"Why not just use workflow_instances for everything?"</div>
+    <div class="answer">"workflow_instances is mutable — you UPDATE it as the workflow progresses. That's fine for current state, but you lose history. workflow_events is append-only — every state change is a new row, never modified, never deleted. This gives you a complete audit trail, which is legally required for identity verification in the EU under eIDAS and AMLR. It also powers real-time SSE updates and makes debugging much easier — you can replay exactly what happened in any workflow."</div>
+    <div class="answer-es">"workflow_instances es mutable — se actualiza con UPDATE. Esta bien para el estado actual, pero pierdes la historia. workflow_events es append-only — cada cambio de estado es una nueva fila, nunca se modifica ni se borra. Esto te da un audit trail completo, legalmente requerido en la UE por eIDAS y AMLR. Tambien alimenta las actualizaciones SSE en tiempo real y facilita el debugging."</div>
   </div>
 
   <!-- ============ MOBILE SDK SPECIFIC ============ -->
@@ -898,6 +1110,191 @@ To verify: we check the signature with our public key.
 Para verificar: comprobamos la firma con nuestra clave publica.
 This is fast — no database call needed to validate a token.
 Es rapido — no necesitamos llamar a la BD para validar un token.</code></pre>
+  </div>
+
+  <!-- ============ JWT DETAILED SIGNING FLOW ============ -->
+  <h3>How JWT Signing and Verification Works (detailed)</h3>
+  <p class="subtitle">Como funciona la firma y verificacion del JWT — paso a paso</p>
+
+  <p>Auth uses <strong>headers</strong>, not cookies. Cookies are for browsers. Your customers are backend servers calling your API — they set the <code>Authorization</code> header explicitly.</p>
+  <p class="es">Auth usa <strong>headers</strong>, no cookies. Las cookies son para navegadores. Tus clientes son servidores backend llamando tu API — ponen el header <code>Authorization</code> explicitamente.</p>
+
+<pre><code>COOKIES (browser world):
+  Browser automatically sends cookies with every request
+  Set-Cookie: session=abc123
+  Used for: web apps where a human is logged in
+
+HEADERS (API world — this is what we use):
+  The calling server explicitly sets the Authorization header
+  Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+  Used for: server-to-server communication, APIs
+
+  Your customer is Deutsche Bank's backend server.
+  It's not a browser. It's a Java/Go/Python app.
+  It doesn't have a cookie jar. It sets headers explicitly.</code></pre>
+
+  <h4>Step 1: Your platform generates a KEY PAIR (once, at setup)</h4>
+  <p class="es">Paso 1: Tu plataforma genera un PAR DE CLAVES (una vez, al configurar)</p>
+
+<pre><code>  ┌─────────────────────┐     ┌─────────────────────┐
+  │    PRIVATE KEY       │     │    PUBLIC KEY        │
+  │                      │     │                      │
+  │  Used to SIGN tokens │     │  Used to VERIFY      │
+  │  Usada para FIRMAR   │     │  tokens              │
+  │                      │     │  Usada para VERIFICAR│
+  │  Kept SECRET on      │     │                      │
+  │  your auth server    │     │  Can be shared with  │
+  │  Se guarda SECRETA   │     │  anyone              │
+  │  en tu auth server   │     │  Se puede compartir  │
+  │                      │     │                      │
+  │  Only YOUR auth      │     │  Your API Gateway    │
+  │  server has this     │     │  has this to check   │
+  │                      │     │  incoming tokens     │
+  └─────────────────────┘     └─────────────────────┘
+
+  Think of it like / Piensa en ello como:
+  - Private key = the stamp that makes official documents
+    Clave privada = el sello que hace documentos oficiales
+  - Public key  = the guide that lets anyone verify the stamp is real
+    Clave publica = la guia que permite verificar que el sello es real</code></pre>
+
+  <h4>Step 2: Customer asks for a token</h4>
+  <p class="es">Paso 2: El cliente pide un token</p>
+
+<pre><code>  Deutsche Bank's server            Your Auth Server
+       │                                  │
+       │── POST /auth/token ─────────────▶│
+       │   Authorization: Basic           │
+       │   base64("dk_live_abc:sk_xyz")   │
+       │                                  │
+       │                          ┌───────┴───────┐
+       │                          │ 1. Decode the  │
+       │                          │    Basic header│
+       │                          │    → api_key:  │
+       │                          │      dk_live_abc
+       │                          │    → api_secret│
+       │                          │      sk_xyz    │
+       │                          │               │
+       │                          │ 2. Look up in  │
+       │                          │    database:   │
+       │                          │    SELECT *    │
+       │                          │    FROM customers
+       │                          │    WHERE api_key│
+       │                          │    = 'dk_live_abc'
+       │                          │               │
+       │                          │ 3. Compare     │
+       │                          │    secret hash │
+       │                          │    bcrypt(sk_xyz)
+       │                          │    == stored_hash?
+       │                          │    ✓ YES       │
+       │                          │               │
+       │                          │ 4. BUILD the   │
+       │                          │    JWT payload:│
+       │                          │    {           │
+       │                          │     sub: "bank-prod",
+       │                          │     scope: "verifications:create",
+       │                          │     iat: 1705312800,
+       │                          │     exp: 1705316400
+       │                          │    }           │
+       │                          │               │
+       │                          │ 5. SIGN it     │
+       │                          │    with the    │
+       │                          │    PRIVATE KEY │
+       │                          │               │
+       │                          │    signature = │
+       │                          │    RSA_SIGN(   │
+       │                          │      header +  │
+       │                          │      payload,  │
+       │                          │      PRIVATE_KEY
+       │                          │    )           │
+       │                          │               │
+       │                          │ 6. Combine:    │
+       │                          │  base64(header)│
+       │                          │  + "."         │
+       │                          │  + base64(payload)
+       │                          │  + "."         │
+       │                          │  + base64(signature)
+       │                          └───────┬───────┘
+       │                                  │
+       │◀── {                             │
+       │  access_token: "eyJhbG.eyJzd.SflKx",
+       │  expires_in: 3600
+       │  } ──────────────────────────────│</code></pre>
+
+  <h4>Step 3: API Gateway verifies the token (NO database call)</h4>
+  <p class="es">Paso 3: El API Gateway verifica el token (SIN llamar a la base de datos)</p>
+
+<pre><code>  Deutsche Bank's server            Your API Gateway
+       │                                  │
+       │── POST /verifications ──────────▶│
+       │   Authorization: Bearer          │
+       │   eyJhbG.eyJzd.SflKx            │
+       │                                  │
+       │                          ┌───────┴───────┐
+       │                          │ 1. Split token │
+       │                          │    by "."      │
+       │                          │    → header    │
+       │                          │    → payload   │
+       │                          │    → signature │
+       │                          │               │
+       │                          │ 2. VERIFY      │
+       │                          │    signature   │
+       │                          │    using       │
+       │                          │    PUBLIC KEY  │
+       │                          │               │
+       │                          │    RSA_VERIFY( │
+       │                          │      header +  │
+       │                          │      payload,  │
+       │                          │      signature,│
+       │                          │      PUBLIC_KEY│
+       │                          │    ) → ✓ VALID │
+       │                          │               │
+       │                          │ 3. Decode      │
+       │                          │    payload:    │
+       │                          │    {           │
+       │                          │     sub: "bank-prod"
+       │                          │     exp: 1705316400
+       │                          │    }           │
+       │                          │               │
+       │                          │ 4. Check exp   │
+       │                          │    > now? ✓    │
+       │                          │               │
+       │                          │ 5. NO DATABASE │
+       │                          │    CALL NEEDED │
+       │                          │    The signature│
+       │                          │    proves it's │
+       │                          │    authentic   │
+       │                          └───────┬───────┘
+       │                                  │
+       │                          Forward to orchestrator
+       │                          with customer_id: "bank-prod"</code></pre>
+
+  <div class="callout success">
+    <div class="label">Why "no database call" matters / Por que importa "sin llamada a la BD"</div>
+<pre><code>WITHOUT JWT (session tokens):
+  Customer sends: Authorization: Bearer random-string-abc123
+  API Gateway must: SELECT * FROM tokens WHERE token = 'abc123'
+  → Database call on EVERY request
+  → 1000 verifications/min = 1000 extra DB queries/min
+
+WITH JWT:
+  Customer sends: Authorization: Bearer eyJhbG.eyJzd.SflKx
+  API Gateway: verify signature with public key (math, in memory)
+  → NO database call
+  → 1000 verifications/min = 0 extra DB queries
+  → Just CPU doing cryptographic math, which is fast
+
+KEY INSIGHT:
+  Your auth server CREATES tokens (needs PRIVATE key)
+  Your API gateway only VERIFIES tokens (needs PUBLIC key)
+  They can be completely different services.
+  The gateway never touches the database for auth.
+
+PUNTO CLAVE:
+  Tu auth server CREA tokens (necesita clave PRIVADA)
+  Tu API gateway solo VERIFICA tokens (necesita clave PUBLICA)
+  Pueden ser servicios completamente diferentes.
+  El gateway nunca toca la base de datos para auth.</code></pre>
   </div>
 
   <div class="callout warn">
