@@ -487,6 +487,693 @@ async function processWebhook(payload) {
     <div class="answer-es">"Reintentamos con retrasos crecientes: inmediato, luego 1 min, 5 min, 15 min, y 1 hora. Despues de agotar los reintentos, marcamos la entrega como fallida y el cliente puede consultar el resultado via GET /verifications/:id. El resultado siempre esta en nuestra base de datos — el webhook es una conveniencia, no la unica forma de obtener el resultado."</div>
   </div>
 
+  <!-- ============ REAL WORLD: iDCHECK.iO SDK-WEB API ============ -->
+  <h2>Real-World Reference: iDCHECK.iO SDK-WEB API</h2>
+  <p class="subtitle">La API real de IDnow &mdash; como funciona en produccion</p>
+
+  <div class="callout warn">
+    <div class="label">Why this matters for the interview / Por que importa para la entrevista</div>
+    <p>This is the <strong>actual IDnow product API</strong> (iDCHECK.iO SDK-WEB). Knowing the real endpoints, the real auth flow, and the real notification system shows you understand the product — not just theory.</p>
+    <p class="es">Esta es la <strong>API real del producto IDnow</strong> (iDCHECK.iO SDK-WEB). Conocer los endpoints reales, el auth real, y el sistema de notificaciones muestra que entiendes el producto — no solo teoria.</p>
+  </div>
+
+  <!-- AUTH -->
+  <h3>Authentication: OAuth2 Password Flow</h3>
+
+  <p>The real API uses OAuth2 (not API key + JWT like our simplified architecture). Customers get tokens from an OpenID Connect server:</p>
+  <p class="es">La API real usa OAuth2 (no API key + JWT como nuestra arquitectura simplificada). Los clientes obtienen tokens de un servidor OpenID Connect:</p>
+
+<pre><code>TOKEN ENDPOINT:
+  Production: https://api.idcheck.ariadnext.io/auth/realms/customer-identity
+              /protocol/openid-connect/token
+  Sandbox:    https://api.idcheck-sandbox.ariadnext.io/auth/realms/customer-identity
+              /protocol/openid-connect/token
+
+  Flow: OAuth2 password grant
+  POST /auth/realms/customer-identity/protocol/openid-connect/token
+  Content-Type: application/x-www-form-urlencoded
+
+  grant_type=password
+  &amp;username=customer_login
+  &amp;password=customer_password
+  &amp;client_id=sdk-web
+
+  Response: { access_token: "eyJ...", expires_in: 300, token_type: "Bearer" }
+
+SERVERS:
+  Production:  https://sdkweb.idcheck.ariadnext.io/rest/v1/idcheckio-sdk-web
+  Sandbox:     https://sdkweb.idcheck-sandbox.ariadnext.io/rest/v1/idcheckio-sdk-web
+  PVID:        https://api.pvid.ariadnext.io/sdkweb/rest/v1/idcheckio-sdk-web</code></pre>
+
+  <!-- MAIN API ENDPOINTS -->
+  <h3>The Real API Endpoints</h3>
+
+  <p>The iDCHECK.iO API has <strong>4 main areas</strong>. Here's how they map to our architecture:</p>
+
+  <table>
+    <tr><th>API Area</th><th>Endpoints</th><th>Maps to in our architecture</th></tr>
+    <tr>
+      <td><strong>Configuration</strong></td>
+      <td><code>POST/GET/PUT/DELETE /configuration</code></td>
+      <td>Customer onboarding — customize the SDK experience (logo, colors, wording, capture settings)</td>
+    </tr>
+    <tr>
+      <td><strong>Onboarding</strong></td>
+      <td><code>POST /onboarding/sendlink</code><br><code>GET /onboarding</code><br><code>GET /onboarding/{uid}/status</code></td>
+      <td>This IS <code>POST /verifications</code> — starts a verification flow and returns a link/uid</td>
+    </tr>
+    <tr>
+      <td><strong>Notification Endpoint</strong></td>
+      <td><code>POST/GET/PUT/DELETE /notification-endpoint</code></td>
+      <td>This is the <strong>webhook registration system</strong> — how customers register their callback URLs</td>
+    </tr>
+    <tr>
+      <td><strong>Monitoring</strong></td>
+      <td><code>GET /monitoring/health</code></td>
+      <td>Health check — returns <code>{status: "UP"}</code></td>
+    </tr>
+  </table>
+
+  <!-- NOTIFICATION ENDPOINTS -->
+  <h2>Notification Endpoints (Webhook Registration)</h2>
+  <p class="subtitle">Como los clientes registran sus webhooks &mdash; the real implementation</p>
+
+  <p>Remember we said "the customer gives us their callback URL"? In the real API, customers don't just pass a URL per request — they <strong>register notification endpoints</strong> in advance. This is the CRUD for managing those.</p>
+  <p class="es">¿Recuerdas que dijimos "el cliente nos da su URL"? En la API real, los clientes no solo pasan una URL por request — <strong>registran notification endpoints</strong> por adelantado. Este es el CRUD para gestionarlos.</p>
+
+  <h3>Create a notification endpoint</h3>
+
+<pre><code>POST /notification-endpoint
+
+{
+  "code": "My_Endpoint_01",               ← customer-defined identifier
+  "url": "http://my-public-url.com/callback",  ← WHERE to send notifications
+  "active": true,                          ← can be turned on/off
+  "useSsl": true,                          ← require HTTPS
+  "subscribedEvents": [                    ← WHICH events to receive
+    "START_ONBOARDING",
+    "END_ONBOARDING",
+    "TASK_ENDED"
+  ],
+  "securityHeaderField": {                 ← custom auth header
+    "name": "Api-key",                        sent with each notification
+    "value": "IdCheckIo-SDK-Web"              so customer can verify it's from us
+  }
+}
+
+Response 201:
+  Same object back, confirming creation.</code></pre>
+
+  <div class="callout success">
+    <div class="label">Key design insight / Punto clave de diseno</div>
+    <p><strong>subscribedEvents</strong> — the customer chooses WHICH events they want. They don't have to receive everything. If they only care about <code>END_ONBOARDING</code> (verification complete), they subscribe to just that. This is the <strong>pub/sub pattern</strong> applied to webhooks.</p>
+    <p class="es"><strong>subscribedEvents</strong> — el cliente elige QUE eventos quiere recibir. No tiene que recibir todo. Si solo le importa <code>END_ONBOARDING</code>, se suscribe solo a eso. Es el <strong>patron pub/sub</strong> aplicado a webhooks.</p>
+  </div>
+
+  <h3>Full CRUD for notification endpoints</h3>
+
+  <table>
+    <tr><th>Method</th><th>Endpoint</th><th>What it does / Que hace</th></tr>
+    <tr><td><code>POST</code></td><td><code>/notification-endpoint</code></td><td>Register a new webhook URL + choose events</td></tr>
+    <tr><td><code>GET</code></td><td><code>/notification-endpoint</code></td><td>List all registered endpoints</td></tr>
+    <tr><td><code>GET</code></td><td><code>/notification-endpoint/{code}</code></td><td>Get one specific endpoint</td></tr>
+    <tr><td><code>PUT</code></td><td><code>/notification-endpoint/{code}</code></td><td>Update URL, events, or active status</td></tr>
+    <tr><td><code>DELETE</code></td><td><code>/notification-endpoint/{code}</code></td><td>Remove a webhook endpoint</td></tr>
+  </table>
+
+  <h3>Notification Events / Eventos de notificacion</h3>
+
+  <table>
+    <tr><th>Event</th><th>When it fires / Cuando se dispara</th><th>Maps to our architecture</th></tr>
+    <tr><td><code>START_ONBOARDING</code></td><td>User opens the verification link and starts the capture</td><td><code>WORKFLOW_CREATED</code> event in workflow_events</td></tr>
+    <tr><td><code>END_ONBOARDING</code></td><td>Verification is complete (success or failure)</td><td><code>WORKFLOW_COMPLETED</code> — this triggers the webhook with the verdict</td></tr>
+    <tr><td><code>TASK_ENDED</code></td><td>An analysis task finishes (OCR, liveness, etc.)</td><td><code>STEP_COMPLETED</code> events — individual step results</td></tr>
+  </table>
+
+  <!-- ONBOARDING FLOW -->
+  <h2>The Onboarding Flow (Real API)</h2>
+  <p class="subtitle">El flujo de onboarding real &mdash; how a verification actually starts</p>
+
+  <h3>Step 1: Send a verification link to the user</h3>
+
+<pre><code>POST /onboarding/sendlink
+
+{
+  "contactData": {
+    "notificationType": "EMAIL",                    ← or SMS
+    "value": "user-email@mydomain.com"
+  },
+  "documentsToCapture": [                           ← WHAT documents to capture
+    {
+      "code": "OWNER_ID",
+      "docTypes": ["ID", "P"],                      ← accept ID card or passport
+      "versoHandling": "MANDATORY",                 ← require back side
+      "label": "Your identity document",
+      "description": "Please take a photo of your ID"
+    },
+    {
+      "code": "SELFIE",
+      "docTypes": ["SELFIE"],                       ← selfie for face match
+      "label": "Take a selfie"
+    },
+    {
+      "code": "LIVENESS",
+      "docTypes": ["LIVENESS"],                     ← liveness detection
+      "label": "Liveness check"
+    }
+  ],
+  "businessUid": "MY_TRANSACTION_123",              ← customer's own reference ID
+  "interfaceSettings": {
+    "confCode": "MyConf_01",                        ← use which UI configuration
+    "language": "EN"
+  },
+  "redirectionData": {
+    "successRedirectUrl": "http://myapp.com/done",  ← where to send user after
+    "errorRedirectUrl": "http://myapp.com/error"
+  },
+  "endpointsToNotify": ["My_Endpoint_01"],          ← which webhook endpoints
+  "options": {
+    "captureMode": "CAMERA",                        ← force camera (no upload)
+    "consent": { "biometricConsent": true }
+  }
+}
+
+Response 201:
+{
+  "uid": "110e8400-e29b-11d4-a716-446655440000",    ← onboarding ID (= our verification_id)
+  "url": "https://sdkweb.idcheck.io/my-brand/uid/welcome",  ← link sent to user
+  "shortenedLink": "https://p.idcheck.io/hjghjYUyu",
+  "expirationDate": "2024-01-16T10:30:00Z"
+}</code></pre>
+
+  <div class="callout">
+    <div class="label">Real supported document types / Tipos de documento soportados</div>
+<pre><code>ID        = National identity card      P         = Passport
+V         = Visa                        DL        = Driving license
+HC        = Health card                 RP        = Resident permit
+SELFIE    = Picture of user             LIVENESS  = Liveness detection
+KBIS      = Company registration        RIB       = Bank account identity
+ADR_PROOF = Residence certificate       PAY_SHEET = Remuneration statement
+TAX_SHEET = Tax bill                    CAR_REG   = Car registration
+OTHER     = Other document (not analyzed)</code></pre>
+  </div>
+
+  <h3>Step 2: Check onboarding status</h3>
+
+<pre><code>GET /onboarding/{uid}/status
+
+Response 200:
+{
+  "uid": "110e8400-e29b-11d4-a716-446655440000",
+  "status": "SUCCESS",                              ← or CREATED, STARTED, ENDED, EXPIRED
+  "result": {
+    "uid": "...",
+    "status": "SUCCESS",                            ← final status
+    "businessUid": "MY_TRANSACTION_123",
+    "analysisResults": [
+      {
+        "code": "OWNER_ID",                         ← the document we asked for
+        "expectedDocTypes": ["ID", "P"],
+        "analysisData": {
+          "docType": "ID",
+          "owner": {
+            "firstNames": ["John"],
+            "lastNames": ["Doe"],
+            "birthDate": { "day": 15, "month": 1, "year": 1990 }
+          },
+          "withQualityIssues": false
+        },
+        "biometricConsent": true
+      }
+    ],
+    "cisData": {                                    ← CIS = Central Identity System
+      "cisFileUid": "...",
+      "fileCheckTaskStatus": "ENDED"                ← or ONGOING, FAILED,
+    },                                              ←    WAITING_MANUAL_ANALYSIS,
+    "extraData": {                                  ←    WAITING_LIVENESS_ANALYSIS
+      "device": { "userAgent": "Mozilla/5.0..." }
+    }
+  }
+}
+
+ONBOARDING STATUS VALUES:
+  CREATED   → link sent, user hasn't opened it yet
+  STARTED   → user opened the link and is capturing documents
+  ENDED     → capture complete, analysis may still be running
+  EXPIRED   → link expired before user completed
+  SUCCESS   → everything done, results available
+
+ERROR CAUSE CODES (when status = ENDED with errors):
+  USER_ERROR          → user made an error (bad photo, etc.)
+  TECHNICAL_ERROR     → system error
+  EXPIRED             → time ran out
+
+CIS TASK STATUS (analysis pipeline):
+  ENDED                      → analysis complete
+  ONGOING                    → analysis still running
+  FAILED                     → technical error in analysis
+  WAITING_MANUAL_ANALYSIS    → routed to human reviewer  ← THIS is manual review!
+  WAITING_LIVENESS_ANALYSIS  → liveness check pending</code></pre>
+
+  <div class="callout warn">
+    <div class="label">WAITING_MANUAL_ANALYSIS / Esperando revision manual</div>
+    <p>This is the real-world implementation of what we discussed in the verification flow. When the automated pipeline can't make a confident decision (low face match score, ambiguous liveness), the CIS task status becomes <code>WAITING_MANUAL_ANALYSIS</code>. A human agent reviews the case. This maps directly to our Decision Engine returning <code>MANUAL_REVIEW</code>.</p>
+    <p class="es">Esta es la implementacion real de lo que discutimos. Cuando el pipeline automatizado no puede decidir con confianza, el estado se vuelve <code>WAITING_MANUAL_ANALYSIS</code>. Un agente humano revisa el caso. Esto mapea directamente a nuestro Decision Engine devolviendo <code>MANUAL_REVIEW</code>.</p>
+  </div>
+
+  <h3>Step 3: List/search onboardings</h3>
+
+<pre><code>GET /onboarding?status=STARTED&amp;dateFrom=2024-01-01&amp;page=0
+
+  Query filters:
+    uid             → specific onboarding
+    status          → CREATED, STARTED, ENDED, EXPIRED, SUCCESS
+    errorCode       → USER_ERROR, TECHNICAL_ERROR
+    dateFrom/dateTo → date range (yyyy-MM-dd)
+    businessUid     → customer's reference ID
+    page            → pagination (zero-based)
+
+  Response includes:
+    totalResults, totalPages, currentPage, numberPerPage
+    + list of onboarding descriptions with captures, status, links</code></pre>
+
+  <!-- CONFIGURATION -->
+  <h2>Configuration API (SDK Customization)</h2>
+  <p class="subtitle">Como los clientes personalizan el SDK</p>
+
+  <p>Customers don't just use a generic SDK — they customize the look and behavior. This is managed through the Configuration API:</p>
+
+<pre><code>POST /configuration
+
+{
+  "code": "MyConf_01",                    ← customer-defined ID
+  "pathName": "my-brand",                 ← appears in the URL: /my-brand/uid/welcome
+  "theme": {
+    "headerBgColor": "#4c5866",           ← brand colors
+    "btnBgColor": "#4c5866",
+    "btnHoverBgColor": "#0a64ce",
+    "titleTxtColor": "#4286f4",
+    "btnTxtColor": "#aa7814",
+    "btnBorderRadius": "15px",
+    "bodyBgColor": "#4c5866",
+    "logo": "base64_encoding",            ← their logo
+    "headerLogoAlign": "LEFT"             ← LEFT, RIGHT, CENTER
+  },
+  "options": {
+    "emailSenderName": "MyCompany",
+    "linkValidity": "PT24H",              ← ISO-8601 duration, max 24h
+    "supportEmail": "support@company.com",
+    "idCaptureSettings": {
+      "captureMode": "CAMERA",            ← CAMERA, UPLOAD, or PROMPT
+      "captureModeDesktop": "CAMERA",
+      "captureModeMobile": "CAMERA",
+      "blockUpload": true,                ← force camera only
+      "disableImageQualityChecks": false,
+      "disableImageBlackAndWhiteChecks": false
+    }
+  },
+  "wordings": [                           ← custom text per language
+    {
+      "language": "EN",
+      "homeTitle": "Verify your identity",
+      "homeMsg": "Welcome to MyBrand verification",
+      "linkEmailSubject": "Verify your identity with MyBrand",
+      "linkEmailMsg": "<a href='{}'>Click here</a> to verify",
+      "onboardingEndMsg": "Verification complete!",
+      "expiredMsg": "This link has expired, please request a new one."
+    }
+  ]
+}
+
+CAPTURE MODES:
+  CAMERA  → open device camera directly
+  UPLOAD  → file upload only
+  PROMPT  → user chooses camera or upload</code></pre>
+
+  <div class="callout success">
+    <div class="label">Why configuration matters / Por que importa la configuracion</div>
+    <p>Each customer wants their users to see THEIR brand, not ours. Deutsche Bank's users see Deutsche Bank colors and logo. Revolut's users see Revolut. The SDK is white-labeled. This is the same concept as the <code>workflow selector</code> in our architecture — different customers get different experiences.</p>
+    <p class="es">Cada cliente quiere que sus usuarios vean SU marca, no la nuestra. Es un SDK white-label. Mismo concepto que el <code>workflow selector</code> — diferentes clientes, diferentes experiencias.</p>
+  </div>
+
+  <!-- COMPLETE FLOW MAP -->
+  <h2>Complete Flow: Real API vs Our Architecture</h2>
+
+<pre><code>REAL API (iDCHECK.iO)              OUR ARCHITECTURE
+─────────────────────              ─────────────────
+
+1. POST /configuration             Customer onboarding
+   (customer creates                (one-time setup)
+    their brand config)
+
+2. POST /notification-endpoint     Customer registers
+   (register webhook URL            callback_url
+    + choose events)
+
+3. POST /onboarding/sendlink       POST /verifications
+   (start verification,             (start workflow,
+    sends link to user)              return verification_id)
+
+4. User captures docs              SDK captures photos
+   via branded SDK web page         + uploads to S3
+
+5. Platform runs analysis          Orchestrator runs DAG:
+   (OCR, liveness, face match)      OCR → Liveness → Face Match
+                                    → Sanctions → Decision
+
+6. CIS task status:                workflow_instances.status:
+   ENDED / ONGOING /                COMPLETED / RUNNING /
+   WAITING_MANUAL_ANALYSIS          PENDING_REVIEW
+
+7. POST to notification            POST to callback_url
+   endpoint URL                     (webhook with verdict)
+   (subscribed events fire)
+
+8. GET /onboarding/{uid}/status    GET /verifications/:id
+   (customer polls for result)      (customer checks status)</code></pre>
+
+  <div class="qa">
+    <div class="question">"Can you explain how the notification system works in the real product?"</div>
+    <div class="answer">"Customers register notification endpoints through a CRUD API — they provide a URL, choose which events to subscribe to (like START_ONBOARDING, END_ONBOARDING), and set a security header for authentication. When events happen, we POST to their registered URLs. They can have multiple endpoints, activate or deactivate them, and subscribe to different event types. The customer also gets a link expiration mechanism — if the user doesn't complete verification within the configured time (up to 24 hours), the onboarding expires and the customer is notified."</div>
+    <div class="answer-es">"Los clientes registran notification endpoints via una API CRUD — dan una URL, eligen a que eventos suscribirse (como START_ONBOARDING, END_ONBOARDING), y ponen un header de seguridad. Cuando pasan eventos, mandamos un POST a sus URLs registradas. Pueden tener multiples endpoints, activarlos o desactivarlos, y suscribirse a diferentes tipos de evento. El cliente tambien tiene mecanismo de expiracion — si el usuario no completa en el tiempo configurado (max 24h), el onboarding expira."</div>
+  </div>
+
+  <div class="qa">
+    <div class="question">"How does the SDK capture flow work?"</div>
+    <div class="answer">"The customer's backend calls POST /onboarding/sendlink with the documents to capture — say an ID card plus a liveness check. The API returns a branded URL that's sent to the user via email or SMS. The user opens it in their browser, the SDK guides them through capturing each document using the device camera. Capture mode is configurable — camera only, upload, or let the user choose. Once all documents are captured, the platform runs analysis. The customer can poll GET /onboarding/{uid}/status or wait for the webhook notification. The analysis can go through automated checks or route to manual review if needed — that shows up as WAITING_MANUAL_ANALYSIS in the task status."</div>
+    <div class="answer-es">"El backend del cliente llama POST /onboarding/sendlink con los documentos a capturar. La API devuelve una URL con la marca del cliente, enviada por email o SMS. El usuario la abre, el SDK lo guia para capturar cada documento con la camara. Una vez capturado todo, la plataforma corre el analisis. El cliente puede hacer polling con GET /onboarding/{uid}/status o esperar el webhook. El analisis puede ser automatizado o ir a revision manual — eso aparece como WAITING_MANUAL_ANALYSIS."</div>
+  </div>
+
+  <!-- ============ INSTANTSIGN FLOW ============ -->
+  <h2>InstantSign Flow (Electronic Signature)</h2>
+  <p class="subtitle">Flujo de InstantSign &mdash; firma electronica con verificacion de identidad</p>
+
+  <div class="callout">
+    <div class="label">What is InstantSign? / Que es InstantSign?</div>
+    <p>InstantSign is an IDnow product that combines <strong>identity verification + electronic signature</strong> in one flow. The customer (e.g. a bank) needs a user to sign a contract, but first they need to verify the user's identity. InstantSign does both.</p>
+    <p class="es">InstantSign combina <strong>verificacion de identidad + firma electronica</strong> en un flujo. El cliente (ej. un banco) necesita que un usuario firme un contrato, pero primero necesita verificar su identidad. InstantSign hace ambas cosas.</p>
+  </div>
+
+  <h3>The Complete Sequence (from the real API)</h3>
+
+<pre><code>  Signer              Customer                      InstantSign
+  (end user)          (e.g. bank's backend)         (IDnow platform)
+    │                      │                              │
+    │                      │                              │
+    │── "I want to sign    │                              │
+    │    this contract" ──▶│                              │
+    │                      │                              │
+    │                      │  Customer handles signing    │
+    │                      │  UI/UX: collects user's      │
+    │                      │  name, contract to sign,     │
+    │                      │  all necessary T&amp;Cs           │
+    │                      │                              │
+    │                      │                              │
+    │  ═══ STEP 1: LOGIN ════════════════════════════════
+    │                      │                              │
+    │                      │── POST /api/v1/{CUSTOMER}    │
+    │                      │   /login ───────────────────▶│
+    │                      │   { "apiKey": "sk_..." }     │
+    │                      │                              │
+    │                      │◀── 200 OK ──────────────────│
+    │                      │   { "authToken": "eyJ..." }  │
+    │                      │   ← JWT token for all        │
+    │                      │     subsequent requests       │
+    │                      │                              │
+    │  ═══ STEP 2: START IDENTIFICATION ═════════════════
+    │                      │                              │
+    │                      │── POST /api/v1/{CUSTOMER}    │
+    │                      │   /identifications/          │
+    │                      │   {TRANSACTION-NUMBER}       │
+    │                      │   /start ───────────────────▶│
+    │                      │   Header: X-API-LOGIN-TOKEN  │
+    │                      │           eyJ...             │
+    │                      │                              │
+    │                      │◀── 200 { "id": "KLM-NOPQR" }│
+    │                      │                              │
+    │  ═══ STEP 3: UPLOAD DOCUMENT DATA ═════════════════
+    │                      │                              │
+    │                      │── POST /api/v1/{CUSTOMER}    │
+    │                      │   /identifications/          │
+    │                      │   documents/{docDefId}/data  │
+    │                      │   ─────────────────────────▶│
+    │                      │   (contract PDF, user data)  │
+    │                      │                              │
+    │  ═══ STEP 4: SIGN ════════════════════════════════
+    │                      │                              │
+    │                      │── POST /api/v1/{CUSTOMER}    │
+    │                      │   /identifications/          │
+    │                      │   {TRANSACTION-NUMBER}       │
+    │                      │   /sign ───────────────────▶│
+    │                      │                              │
+    │                      │                       ┌──────┤
+    │                      │                       │Prepare│
+    │                      │                       │signed │
+    │                      │                       │AES    │
+    │                      │                       │PDF    │
+    │                      │                       └──────┤
+    │                      │                              │
+    │  ═══ STEP 5: FINAL WEBHOOK ════════════════════════
+    │                      │                              │
+    │                      │◀── FINAL webhook ───────────│
+    │                      │   "Signing complete,         │
+    │                      │    document ready"           │
+    │                      │                              │
+    │  ═══ STEP 6: RETRIEVE SIGNED DOCUMENT ═════════════
+    │                      │                              │
+    │                      │── GET /api/v1/{CUSTOMER}     │
+    │                      │   /identifications/          │
+    │                      │   documents/{DOCUMENT-DEF-ID}│
+    │                      │   /signed ─────────────────▶│
+    │                      │                              │
+    │                      │◀── (signed AES PDF) ────────│
+    │                      │                              │
+    │◀── "Here's your     │                              │
+    │     signed contract" │                              │
+    │                      │                              │</code></pre>
+
+  <h3>API Endpoints Summary</h3>
+
+  <table>
+    <tr><th>Step</th><th>Method</th><th>Endpoint</th><th>Purpose / Proposito</th></tr>
+    <tr>
+      <td>1. Login</td>
+      <td><code>POST</code></td>
+      <td><code>/api/v1/{CUSTOMER}/login</code></td>
+      <td>Authenticate with API key, get JWT (<code>authToken</code>)</td>
+    </tr>
+    <tr>
+      <td>2. Start</td>
+      <td><code>POST</code></td>
+      <td><code>/api/v1/{CUSTOMER}/identifications/{TX-NUM}/start</code></td>
+      <td>Create a new identification + signing session</td>
+    </tr>
+    <tr>
+      <td>3. Document</td>
+      <td><code>POST</code></td>
+      <td><code>/api/v1/{CUSTOMER}/identifications/documents/{docDefId}/data</code></td>
+      <td>Upload the contract/document to be signed</td>
+    </tr>
+    <tr>
+      <td>4. Sign</td>
+      <td><code>POST</code></td>
+      <td><code>/api/v1/{CUSTOMER}/identifications/{TX-NUM}/sign</code></td>
+      <td>Trigger the signing process → platform creates AES signed PDF</td>
+    </tr>
+    <tr>
+      <td>5. Webhook</td>
+      <td><code>POST</code></td>
+      <td><em>(customer's URL)</em></td>
+      <td>Platform notifies customer when signing is complete</td>
+    </tr>
+    <tr>
+      <td>6. Download</td>
+      <td><code>GET</code></td>
+      <td><code>/api/v1/{CUSTOMER}/identifications/documents/{docDefId}/signed</code></td>
+      <td>Retrieve the signed PDF document</td>
+    </tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">How auth works here / Como funciona el auth aqui</div>
+<pre><code>STEP 1: Customer sends API key → gets JWT back
+  POST /api/v1/{CUSTOMER}/login
+  Body: { "apiKey": "sk_live_..." }
+  Response: { "authToken": "eyJhbGciOiJIUzUxMiJ9..." }
+
+STEP 2+: Every subsequent request includes the JWT as a header
+  X-API-LOGIN-TOKEN: eyJhbGciOiJIUzUxMiJ9...
+
+  This is the SAME pattern as our architecture:
+  API key → get token → use token for all calls
+  The only difference: header name is X-API-LOGIN-TOKEN
+  instead of Authorization: Bearer</code></pre>
+  </div>
+
+  <div class="callout warn">
+    <div class="label">The FINAL webhook / El webhook FINAL</div>
+    <p>Notice that the webhook comes AFTER the platform prepares the signed PDF. The customer doesn't poll — they wait for the webhook, then call GET to download the signed document. Same async pattern as our verification flow: do work → webhook → customer retrieves result.</p>
+    <p class="es">El webhook viene DESPUES de que la plataforma prepara el PDF firmado. El cliente no hace polling — espera el webhook, luego llama GET para descargar el documento firmado. Mismo patron asincrono que nuestro flujo de verificacion.</p>
+  </div>
+
+  <!-- ============ eID FLOW ============ -->
+  <h2>German eID Flow (Electronic ID Card)</h2>
+  <p class="subtitle">Flujo de eID Aleman &mdash; verificacion con chip RFID</p>
+
+  <p>Germany introduced RFID chip-based electronic ID cards in 2010. The eID product reads identity data directly from the chip using NFC on mobile devices. This is <strong>the highest security level</strong> — the identity comes from a government-issued chip, not from OCR or photos.</p>
+  <p class="es">Alemania introdujo tarjetas de identidad electronicas con chip RFID en 2010. El producto eID lee datos de identidad directamente del chip usando NFC en dispositivos moviles. Este es el <strong>nivel de seguridad mas alto</strong> — la identidad viene de un chip gubernamental, no de OCR o fotos.</p>
+
+  <div class="callout">
+    <div class="label">Mobile only / Solo movil</div>
+    <p>The eID product is only available on mobile — the phone needs NFC to read the ID card's RFID chip. BSI (Bundesamt fur Sicherheit in der Informationstechnik) has approved this method for digital identification.</p>
+    <p class="es">El producto eID solo esta disponible en movil — el telefono necesita NFC para leer el chip RFID de la tarjeta. BSI ha aprobado este metodo para identificacion digital.</p>
+  </div>
+
+<pre><code>eID FLOW:
+─────────
+  User's Phone (NFC)          Customer Backend           IDnow eID
+       │                            │                        │
+       │                            │                        │
+       │  ═══ STEP 1: LOGIN ══════════════════════════════════
+       │                            │                        │
+       │                            │── POST /api/v1/        │
+       │                            │   {CUSTOMER}/login ───▶│
+       │                            │   { "apiKey": "..." }  │
+       │                            │                        │
+       │                            │◀── { authToken }  ────│
+       │                            │                        │
+       │  ═══ STEP 2: CREATE IDENT ═══════════════════════════
+       │                            │                        │
+       │                            │── POST /api/v1/        │
+       │                            │   {CUSTOMER}/          │
+       │                            │   identifications/     │
+       │                            │   {TX-NUM}/start ─────▶│
+       │                            │   Header:              │
+       │                            │   X-API-LOGIN-TOKEN    │
+       │                            │                        │
+       │                            │◀── { id: "KLM-..." } ─│
+       │                            │                        │
+       │  ═══ STEP 3: USER READS CHIP ════════════════════════
+       │                            │                        │
+       │  User holds ID card        │                        │
+       │  against phone (NFC)       │                        │
+       │       │                    │                        │
+       │  ┌────┴────┐              │                        │
+       │  │ Phone   │              │                        │
+       │  │ reads   │              │                        │
+       │  │ RFID    │──── chip data ────────────────────────▶│
+       │  │ chip    │              │                        │
+       │  └─────────┘              │                        │
+       │                            │                        │
+       │  ═══ STEP 4: VERIFICATION RESULT ════════════════════
+       │                            │                        │
+       │                            │◀── webhook ───────────│
+       │                            │   { verified: true,    │
+       │                            │     name, DOB, etc.    │
+       │                            │     from chip data }   │
+       │                            │                        │
+
+
+  WHY eID IS DIFFERENT FROM PHOTO-BASED VERIFICATION:
+  POR QUE eID ES DIFERENTE DE VERIFICACION CON FOTOS:
+
+  Photo-based (iDCHECK.iO):
+    User takes photo → OCR reads text → liveness check → face match
+    Confidence scores: OCR 0.97, face match 0.94
+    Can fail: blurry photo, bad lighting, presentation attack
+
+  eID (chip-based):
+    User taps card on phone → NFC reads chip → cryptographic proof
+    No confidence scores — the data IS correct (comes from government chip)
+    No face match needed — the chip proves identity directly
+    No OCR needed — data is structured, not extracted from an image
+
+  eID maps to our architecture as a DIFFERENT WORKFLOW:
+    Instead of: OCR → Liveness → Face Match → Sanctions → Decision
+    It's:       eID Read → Sanctions → Decision
+    Fewer steps, higher confidence, different DAG definition.</code></pre>
+
+  <h3>How eID Maps to Our Architecture</h3>
+
+  <table>
+    <tr><th>Concept</th><th>Photo-based (iDCHECK.iO)</th><th>eID (chip-based)</th></tr>
+    <tr>
+      <td><strong>Identity source</strong></td>
+      <td>Photo of document → OCR extracts data</td>
+      <td>RFID chip → NFC reads data directly</td>
+    </tr>
+    <tr>
+      <td><strong>Liveness needed?</strong></td>
+      <td>Yes — prove it's a real person, not a photo of a photo</td>
+      <td>No — the chip itself is the proof (cryptographically signed by government)</td>
+    </tr>
+    <tr>
+      <td><strong>Face match needed?</strong></td>
+      <td>Yes — compare document face to selfie</td>
+      <td>No — the chip data is authoritative</td>
+    </tr>
+    <tr>
+      <td><strong>DAG steps</strong></td>
+      <td>OCR → Liveness → Face Match → Sanctions → Decision</td>
+      <td>eID Read → Sanctions → Decision</td>
+    </tr>
+    <tr>
+      <td><strong>Confidence</strong></td>
+      <td>Probabilistic (scores: 0.0 - 1.0)</td>
+      <td>Deterministic (valid or invalid)</td>
+    </tr>
+    <tr>
+      <td><strong>Client</strong></td>
+      <td>Mobile SDK, Web SDK, Backend</td>
+      <td>Mobile only (needs NFC hardware)</td>
+    </tr>
+    <tr>
+      <td><strong>Auth pattern</strong></td>
+      <td>Same: API key → JWT → use in headers</td>
+      <td>Same: API key → JWT → use in headers</td>
+    </tr>
+  </table>
+
+  <div class="callout success">
+    <div class="label">This is the Workflow Selector in action / El Workflow Selector en accion</div>
+    <p>Remember the <strong>Workflow Selector</strong> from <a href="architecture.html">Architecture</a>? This is exactly why it exists. Based on country (Germany) + method (eID), the orchestrator selects a DIFFERENT DAG. The engine doesn't change — only the workflow definition. Same engine, different steps.</p>
+    <p class="es">¿Recuerdas el <strong>Workflow Selector</strong> de la <a href="architecture.html">Arquitectura</a>? Para esto existe. Basado en pais (Alemania) + metodo (eID), el orquestador selecciona un DAG DIFERENTE. El motor no cambia — solo la definicion del workflow. Mismo motor, diferentes pasos.</p>
+  </div>
+
+  <!-- ============ ALL API PATTERNS COMPARISON ============ -->
+  <h2>All IDnow API Patterns Side by Side</h2>
+  <p class="subtitle">Todos los patrones de API de IDnow comparados</p>
+
+<pre><code>PRODUCT              AUTH                    START                         RESULT
+───────              ────                    ─────                         ──────
+
+iDCHECK.iO           OAuth2 password         POST /onboarding/sendlink     Webhook + GET
+(SDK-WEB)            grant → Bearer token    → returns link + uid          /onboarding/{uid}/status
+
+InstantSign          POST /login             POST /identifications/        Webhook + GET
+                     → authToken             {TX}/start → then /sign       /documents/{id}/signed
+
+eID                  POST /login             POST /identifications/        Webhook
+(German)             → authToken             {TX}/start → NFC chip read
+
+COMMON PATTERNS ACROSS ALL PRODUCTS:
+─────────────────────────────────────
+  1. Auth: API key → get token → use token in headers
+  2. Start: POST to create an identification session
+  3. Process: platform does the work asynchronously
+  4. Result: webhook notification when done
+  5. Retrieve: GET to fetch detailed results/documents
+
+  Same patterns, different products. This is why the
+  orchestrator architecture works — the engine is generic,
+  only the workflow definitions differ per product.</code></pre>
+
+  <div class="qa">
+    <div class="question">"How does the platform handle different products like signing vs verification vs eID?"</div>
+    <div class="answer">"The core architecture is the same — the Workflow Selector picks a different DAG per product. For identity verification with photos, the DAG is OCR, liveness, face match, sanctions, decision. For InstantSign, it adds document upload and electronic signature steps. For German eID, it replaces OCR and liveness with an NFC chip read — fewer steps, higher confidence. The auth pattern is consistent across products: API key to get a token, token in headers for all requests. And all products use the same async pattern: start a session, platform processes in the background, webhook when done, GET to retrieve results."</div>
+    <div class="answer-es">"La arquitectura base es la misma — el Workflow Selector elige un DAG diferente por producto. Para verificacion con fotos: OCR, liveness, face match, sanciones, decision. Para InstantSign: agrega subida de documento y firma electronica. Para eID aleman: reemplaza OCR y liveness con lectura NFC — menos pasos, mas confianza. El auth es consistente: API key para obtener token, token en headers. Y todos usan el mismo patron asincrono: crear sesion, procesar en background, webhook al terminar, GET para obtener resultado."</div>
+  </div>
+
   <a href="architecture.html" class="back-top">&larr; Back to Architecture</a>
 
 </div>
