@@ -505,6 +505,246 @@
   Customer        API Gateway     Orchestrator     PostgreSQL       S3              Services
 </code></pre>
 
+  <!-- ============ REAL IDENTITY VERIFICATION FLOW ============ -->
+  <h2>Real Identity Verification Flow (IDnow API) / Flujo Real de Verificacion de Identidad</h2>
+  <p class="subtitle">Como se ve el flujo completo con endpoints reales — mapped to our architecture</p>
+
+  <div class="callout warn">
+    <div class="label">This is the REAL flow / Este es el flujo REAL</div>
+    <p>The general sequence diagram above shows the abstract architecture. This section shows the <strong>same architecture</strong> but with <strong>real IDnow API endpoints</strong> — how identity verification actually works end-to-end.</p>
+    <p class="es">El diagrama general de arriba muestra la arquitectura abstracta. Esta seccion muestra la <strong>misma arquitectura</strong> pero con <strong>endpoints reales de IDnow</strong> — como funciona la verificacion de identidad de principio a fin.</p>
+  </div>
+
+<pre><code>  Customer          Our Platform        SDK Web         External         PostgreSQL
+  Backend           (API Gateway +      (user's         Services         + S3
+                     Orchestrator)       browser)        (OCR, etc.)
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 1: AUTHENTICATE (OAuth2) ══════════════════════════════════════
+    │                    │                  │                │                │
+    │── POST /oauth2/token ─────────────▶│                  │                │
+    │   grant_type: password              │                  │                │
+    │   username: "api_key"               │                  │                │
+    │   password: "api_secret"            │                  │                │
+    │                    │                  │                │                │
+    │◀── {                                │                  │                │
+    │     access_token: "eyJ...",         │                  │                │
+    │     expires_in: 3600               │                  │                │
+    │   } ───────────────│                │                  │                │
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 2: CREATE ONBOARDING ══════════════════════════════════════════
+    │                    │                  │                │                │
+    │── POST /onboarding/sendlink ──────▶│                  │                │
+    │   Authorization: Bearer eyJ...      │                  │                │
+    │   {                                 │                  │                │
+    │     productName: "Identity",        │                  │                │
+    │     language: "de",                 │                  │                │
+    │     signer: {                       │                  │                │
+    │       first_name: "Jane",           │                  │                │
+    │       last_name: "Doe",             │                  │                │
+    │       email: "jane@email.com",      │                  │                │
+    │       country: "DE"                 │                  │                │
+    │     }                               │                  │                │
+    │   }                                 │                  │                │
+    │                    │                  │                │                │
+    │                    │  Internally:     │                │                │
+    │                    │  1. Select DAG   │                │                │
+    │                    │     (country=DE, │                │                │
+    │                    │      product=    │                │                │
+    │                    │      Identity)   │                │                │
+    │                    │                  │                │                │
+    │                    │  2. Create       │                │                │
+    │                    │     workflow     │── INSERT ─────────────────────▶│
+    │                    │     instance     │  workflow_instances            │
+    │                    │                  │  {status: RUNNING}            │
+    │                    │                  │                │                │
+    │                    │  3. Generate     │── INSERT ─────────────────────▶│
+    │                    │     SDK link     │  workflow_events               │
+    │                    │                  │  {WORKFLOW_CREATED}            │
+    │                    │                  │                │                │
+    │◀── {                                │                  │                │
+    │     uid: "abc-123",                 │                  │                │
+    │     url: "https://go.idnow.de/     │                  │                │
+    │           Identity/abc-123/start"   │                  │                │
+    │   } ───────────────│                │                  │                │
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 3: USER OPENS SDK ═════════════════════════════════════════════
+    │                    │                  │                │                │
+    │── Redirect user ──────────────────▶│                  │                │
+    │   to SDK URL                        │                  │                │
+    │                    │                  │                │                │
+    │                    │     SDK loads    │                │                │
+    │                    │     in browser   │                │                │
+    │                    │     (white-label │                │                │
+    │                    │      iFrame or   │                │                │
+    │                    │      redirect)   │                │                │
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 4: USER CAPTURES DOCUMENTS ════════════════════════════════════
+    │                    │                  │                │                │
+    │                    │                  │ User takes     │                │
+    │                    │                  │ photo of       │                │
+    │                    │                  │ passport       │                │
+    │                    │                  │                │                │
+    │                    │                  │ User takes     │                │
+    │                    │                  │ selfie/video   │                │
+    │                    │                  │ for liveness   │                │
+    │                    │                  │                │                │
+    │                    │                  │── PUT images ──────────────────▶│
+    │                    │                  │   (pre-signed URLs              │
+    │                    │                  │    direct to S3)                │
+    │                    │                  │                │                │
+    │                    │◀─ SDK notifies ──│                │                │
+    │                    │   "capture done" │                │                │
+    │                    │   images: {URIs} │                │                │
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 5: ORCHESTRATOR RUNS DAG ══════════════════════════════════════
+    │                    │                  │                │                │
+    │                    │  Clock tick 0:   │                │                │
+    │                    │  OCR + Liveness  │                │                │
+    │                    │  (PARALLEL)      │                │                │
+    │                    │                  │                │                │
+    │                    │── POST /execute (OCR) ───────────▶│                │
+    │                    │── POST /execute (liveness) ──────▶│                │
+    │                    │                  │                │                │
+    │                    │                  │         ┌──────┤                │
+    │                    │                  │         │OCR   │◀─ GET image ──│
+    │                    │                  │         │reads │── PUT face ──▶│
+    │                    │                  │         │image │   crop to S3  │
+    │                    │                  │         └──────┤                │
+    │                    │                  │                │                │
+    │                    │◀── OCR: {name:"Jane Doe",        │                │
+    │                    │    confidence:0.97,               │                │
+    │                    │    face_crop:"s3://face.jpg"} ───│                │
+    │                    │                  │                │                │
+    │                    │◀── Liveness: {alive:true,         │                │
+    │                    │    best_frame:"s3://frame.jpg"} ─│                │
+    │                    │                  │                │                │
+    │                    │── UPDATE + INSERT ──────────────────────────────▶│
+    │                    │   step_executions + workflow_events              │
+    │                    │                  │                │                │
+    │                    │  Clock tick 1:   │                │                │
+    │                    │  Face Match +    │                │                │
+    │                    │  Sanctions       │                │                │
+    │                    │  (PARALLEL)      │                │                │
+    │                    │                  │                │                │
+    │                    │── POST /execute (face_match) ────▶│                │
+    │                    │── POST /execute (sanctions) ─────▶│                │
+    │                    │                  │                │                │
+    │                    │◀── {match_score: 0.94} ──────────│                │
+    │                    │◀── {hit: false} ─────────────────│                │
+    │                    │                  │                │                │
+    │                    │  Clock tick 2:   │                │                │
+    │                    │  DECISION        │                │                │
+    │                    │  (internal)      │                │                │
+    │                    │                  │                │                │
+    │                    │  All checks OK   │                │                │
+    │                    │  → APPROVED      │                │                │
+    │                    │                  │                │                │
+    │                    │── UPDATE ────────────────────────────────────────▶│
+    │                    │   workflow_instances                              │
+    │                    │   status: COMPLETED, verdict: APPROVED           │
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 6: WEBHOOK NOTIFICATION ═══════════════════════════════════════
+    │                    │                  │                │                │
+    │◀── POST callback_url (webhook) ────│                  │                │
+    │   event-type: END_ONBOARDING        │                  │                │
+    │   webhook-id: wh_abc123             │                  │                │
+    │   signature: HMAC-SHA256            │                  │                │
+    │   {                                 │                  │                │
+    │     uid: "abc-123",                 │                  │                │
+    │     event: "END_ONBOARDING",        │                  │                │
+    │     status: "APPROVED",             │                  │                │
+    │     timestamp: "2024-01-15T10:30:07Z"                  │                │
+    │   }                                 │                  │                │
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 7: RETRIEVE FULL RESULTS ══════════════════════════════════════
+    │                    │                  │                │                │
+    │── GET /onboarding/abc-123/status ─▶│                  │                │
+    │   Authorization: Bearer eyJ...      │                  │                │
+    │                    │                  │                │                │
+    │◀── {                                │                  │                │
+    │     uid: "abc-123",                 │                  │                │
+    │     status: "APPROVED",             │                  │                │
+    │     signer: {                       │                  │                │
+    │       first_name: "Jane",           │                  │                │
+    │       last_name: "Doe",             │                  │                │
+    │       date_of_birth: "1990-01-01",  │                  │                │
+    │       nationality: "DE"             │                  │                │
+    │     },                              │                  │                │
+    │     verification: {                 │                  │                │
+    │       ocr_confidence: 0.97,         │                  │                │
+    │       face_match_score: 0.94,       │                  │                │
+    │       liveness: true,               │                  │                │
+    │       sanctions_hit: false           │                  │                │
+    │     }                               │                  │                │
+    │   } ───────────────│                │                  │                │
+    │                    │                  │                │                │
+    │                    │                  │                │                │
+    │  ═══ STEP 8: CUSTOMER ACTS ON RESULT ════════════════════════════════════
+    │                    │                  │                │                │
+    │  Customer's system:                 │                  │                │
+    │  → Updates their database           │                  │                │
+    │  → Activates user account           │                  │                │
+    │  → Sends email: "Verified!"         │                  │                │
+    │                    │                  │                │                │
+  Customer          Our Platform        SDK Web         Services         Data Layer
+</code></pre>
+
+  <div class="callout success">
+    <div class="label">How this maps to our architecture / Como se mapea a nuestra arquitectura</div>
+    <table>
+      <tr><th>Real API Step</th><th>Architecture Layer</th><th>What Happens Inside</th></tr>
+      <tr>
+        <td><code>POST /oauth2/token</code></td>
+        <td>API Gateway (Auth)</td>
+        <td>Validates credentials, generates JWT with private key</td>
+      </tr>
+      <tr>
+        <td><code>POST /onboarding/sendlink</code></td>
+        <td>API Gateway → Orchestrator</td>
+        <td>Auth validates JWT, orchestrator creates workflow + selects DAG</td>
+      </tr>
+      <tr>
+        <td>SDK captures documents</td>
+        <td>Client Layer → S3</td>
+        <td>SDK uploads images via pre-signed URLs directly to S3</td>
+      </tr>
+      <tr>
+        <td>DAG execution (hidden)</td>
+        <td>Orchestrator → External Services</td>
+        <td>Clock ticks: OCR+Liveness → Face Match+Sanctions → Decision</td>
+      </tr>
+      <tr>
+        <td><code>POST callback_url</code></td>
+        <td>Orchestrator → Customer</td>
+        <td>Webhook with END_ONBOARDING event, HMAC-signed</td>
+      </tr>
+      <tr>
+        <td><code>GET /onboarding/{uid}/status</code></td>
+        <td>API Gateway → PostgreSQL</td>
+        <td>Reads workflow_instances + step_executions, returns full result</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="callout">
+    <div class="label">Key insight / Punto clave</div>
+    <p>The customer only sees <strong>4 API calls</strong>: authenticate, create onboarding, receive webhook, get results. They never see the DAG, the clock ticks, or the individual service calls. That complexity is <strong>hidden inside our platform</strong>.</p>
+    <p class="es">El cliente solo ve <strong>4 llamadas API</strong>: autenticarse, crear onboarding, recibir webhook, obtener resultados. Nunca ven el DAG, los clock ticks, o las llamadas individuales a servicios. Esa complejidad esta <strong>oculta dentro de nuestra plataforma</strong>.</p>
+  </div>
+
+  <div class="qa">
+    <div class="question">"Walk me through a real identity verification from start to finish."</div>
+    <div class="answer">"The customer's backend authenticates with OAuth2 to get a JWT token. Then it calls POST /onboarding/sendlink with the signer's info — our platform creates a workflow instance, selects the right DAG for that country and product, and returns a URL. The customer redirects their user to that URL, where our SDK loads in the browser. The user captures their document and selfie — the SDK uploads images directly to S3 via pre-signed URLs. Once capture is done, the orchestrator runs the DAG: clock tick 0 runs OCR and liveness in parallel, clock tick 1 runs face match and sanctions in parallel, clock tick 2 runs the decision engine internally. When done, we POST a webhook to the customer's callback URL with the verdict. The customer can then GET the full results with extracted data, confidence scores, and match details."</div>
+    <div class="answer-es">"El backend del cliente se autentica con OAuth2 para obtener un JWT. Luego llama POST /onboarding/sendlink con la info del firmante — nuestra plataforma crea una instancia de workflow, selecciona el DAG correcto, y devuelve una URL. El cliente redirige a su usuario a esa URL, donde nuestro SDK carga en el navegador. El usuario captura su documento y selfie — el SDK sube imagenes directo a S3 via URLs pre-firmadas. El orquestador ejecuta el DAG: tick 0 = OCR + liveness en paralelo, tick 1 = face match + sanctions en paralelo, tick 2 = decision. Al terminar, enviamos un webhook al callback_url del cliente con el veredicto. El cliente puede luego hacer GET para los resultados completos."</div>
+  </div>
+
   <!-- ============ WHY SEPARATE LINES IN THE DIAGRAM ============ -->
   <h2>Why Are POST, Auth, and Create Workflow Separate Lines?</h2>
   <p class="subtitle">Por que son lineas separadas en el diagrama</p>

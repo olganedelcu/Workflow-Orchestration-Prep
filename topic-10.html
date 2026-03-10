@@ -1174,6 +1174,222 @@ COMMON PATTERNS ACROSS ALL PRODUCTS:
     <div class="answer-es">"La arquitectura base es la misma — el Workflow Selector elige un DAG diferente por producto. Para verificacion con fotos: OCR, liveness, face match, sanciones, decision. Para InstantSign: agrega subida de documento y firma electronica. Para eID aleman: reemplaza OCR y liveness con lectura NFC — menos pasos, mas confianza. El auth es consistente: API key para obtener token, token en headers. Y todos usan el mismo patron asincrono: crear sesion, procesar en background, webhook al terminar, GET para obtener resultado."</div>
   </div>
 
+  <!-- ============ AUTOIDENT REAL API ============ -->
+  <h2>AutoIdent: Real API Response / Respuesta Real de la API</h2>
+  <p class="subtitle">What the actual IDnow AutoIdent API returns — un ejemplo real</p>
+
+  <p>When you create an identification via the AutoIdent product, the API returns this response:</p>
+  <p class="es">Cuando creas una identificacion via el producto AutoIdent, la API devuelve esta respuesta:</p>
+
+<pre><code>POST /identifications
+Authorization: Bearer {token}
+{
+  "method": "idnow_autoident",
+  "language": "DE",
+  "proof_of_address_type": "GAS_BILL",
+  "proof_of_address_issued_at": "2022-09-21"
+}
+
+RESPONSE (201 Created):
+{
+  "id": "53e2e4c098045c12cd7249b2b9b2de51cidt",
+  "reference": "TS2-ADLSU",
+  "url": "https://go.test.idnow.de/solarisbankautosandbox/identifications/53e2e4c098045c12cd7249b2b9b2de51cidt",
+  "status": "pending",
+  "completed_at": null,
+  "method": "idnow_autoident",
+  "proof_of_address_type": "GAS_BILL",
+  "proof_of_address_issued_at": "2022-09-21",
+  "language": "DE",
+  "iban": null,
+  "terms_and_conditions_signed_at": null,
+  "authorization_expires_at": null,
+  "confirmation_expires_at": null,
+  "estimated_waiting_time": 60
+}</code></pre>
+
+  <h3>Field breakdown / Desglose de campos</h3>
+
+  <table>
+    <tr><th>Field</th><th>What it means</th><th>Maps to our architecture</th></tr>
+    <tr>
+      <td><code>id</code></td>
+      <td>Unique identification ID (their workflow_id)</td>
+      <td><code>workflow_instances.id</code></td>
+    </tr>
+    <tr>
+      <td><code>reference</code></td>
+      <td>Short human-readable reference code</td>
+      <td>Optional field in our workflow — useful for support</td>
+    </tr>
+    <tr>
+      <td><code>url</code></td>
+      <td>URL where the user goes to start the identification</td>
+      <td>Same as the SDK URL we return in <code>POST /onboarding/sendlink</code></td>
+    </tr>
+    <tr>
+      <td><code>status: "pending"</code></td>
+      <td>Identification created but not started by user yet</td>
+      <td><code>workflow_instances.status = "CREATED"</code> (before DAG runs)</td>
+    </tr>
+    <tr>
+      <td><code>method: "idnow_autoident"</code></td>
+      <td>Which product/flow to use (AutoIdent = fully automated)</td>
+      <td>This is what the <strong>Workflow Selector</strong> uses to pick the right DAG</td>
+    </tr>
+    <tr>
+      <td><code>estimated_waiting_time: 60</code></td>
+      <td>Estimated seconds for the identification to complete</td>
+      <td>Useful for SDK UX — shows progress bar</td>
+    </tr>
+    <tr>
+      <td><code>proof_of_address_type</code></td>
+      <td>Some flows require address verification (KYC requirement)</td>
+      <td>Additional step in the DAG — not all workflows need this</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <div class="label">AutoIdent vs our architecture</div>
+<pre><code>AutoIdent = fully automated identity verification
+           = our "standard" DAG: OCR → Liveness → Face Match → Sanctions → Decision
+
+Their "method" field = our "Workflow Selector" input
+Their "id"           = our "workflow_id"
+Their "url"          = our "SDK redirect URL"
+Their "status"       = our "workflow_instances.status"
+
+THE FLOW:
+  1. POST /identifications → creates identification (status: "pending")
+  2. Redirect user to the URL
+  3. User goes through the SDK (captures docs + selfie)
+  4. Platform runs the DAG (OCR, liveness, face match, sanctions)
+  5. Webhook: identification completed
+  6. GET /identifications/{id} → full results
+
+This is EXACTLY our architecture.</code></pre>
+  </div>
+
+  <!-- ============ PROOF OF ADDRESS ============ -->
+  <h3>Proof of Address: Extra DAG Step</h3>
+
+  <p>Some KYC regulations require not just identity verification but also <strong>proof of address</strong>. The AutoIdent response includes <code>proof_of_address_type: "GAS_BILL"</code> — this means the user also needs to upload an address document.</p>
+  <p class="es">Algunas regulaciones KYC requieren no solo verificacion de identidad sino tambien <strong>prueba de domicilio</strong>. La respuesta incluye <code>proof_of_address_type: "GAS_BILL"</code> — el usuario tambien necesita subir un documento de domicilio.</p>
+
+<pre><code>STANDARD DAG (identity only):
+  OCR → Liveness → Face Match → Sanctions → Decision
+
+EXTENDED DAG (identity + address):
+  OCR → Liveness → Face Match → Sanctions ─┐
+                                            ├→ Decision
+  Address Doc OCR → Address Validation ────┘
+
+The DAG just gets more steps.
+The engine doesn't change — only the workflow definition.
+El DAG solo tiene mas pasos.
+El motor no cambia — solo la definicion del workflow.</code></pre>
+
+  <!-- ============ TECHNOLOGY & INTEGRATIONS ============ -->
+  <h2>Technology &amp; Integrations</h2>
+  <p class="subtitle">IDnow no vive aislado — se integra con otras plataformas</p>
+
+  <p>IDnow provides its own identification solutions (VideoIdent, AutoIdent, eID). But it also integrates with other platforms:</p>
+  <p class="es">IDnow provee sus propias soluciones de identificacion. Pero tambien se integra con otras plataformas:</p>
+
+  <h3>Walt.id — Web3 / Decentralized Identity</h3>
+
+<pre><code>TRADITIONAL IDENTITY (what we build):
+  User → shows document → platform verifies → stores result in DB
+  Every time the user needs verification → repeat the process
+
+DECENTRALIZED IDENTITY (Walt.id integration):
+  User → shows document → platform verifies → issues a CREDENTIAL
+  The credential lives in the USER'S wallet (phone)
+  Next time → user presents credential → instant verification
+  No need to repeat OCR, liveness, face match
+
+  ┌──────────────┐          ┌──────────────┐        ┌──────────────┐
+  │   IDnow      │  issues  │   User's     │ shows  │  Any Service │
+  │ (verifier)   │ ────────▶│   Wallet     │───────▶│  (relying    │
+  │              │credential│   (Walt.id)  │        │   party)     │
+  └──────────────┘          └──────────────┘        └──────────────┘
+
+  BENEFITS:
+  - User verifies ONCE, uses credential MANY times
+  - Privacy: user controls what data to share
+  - No central database of identities needed
+  - Compliant with eIDAS 2.0 digital identity wallet</code></pre>
+
+  <div class="callout success">
+    <div class="label">How this affects our architecture</div>
+    <p>The orchestrator doesn't change. Walt.id is just another <strong>output channel</strong> after the decision step. If the verdict is APPROVED, we can optionally issue a verifiable credential via Walt.id's API — it's an additional step in the DAG, not a replacement.</p>
+    <p class="es">El orquestador no cambia. Walt.id es solo otro <strong>canal de salida</strong> despues del paso de decision. Si el veredicto es APPROVED, opcionalmente emitimos una credencial verificable via la API de Walt.id — es un paso adicional en el DAG, no un reemplazo.</p>
+  </div>
+
+<pre><code>EXTENDED DAG (with credential issuance):
+
+  OCR → Liveness → Face Match → Sanctions → Decision ─┬→ Webhook (notify customer)
+                                                       │
+                                                       └→ Issue Credential (Walt.id)
+                                                          POST /credentials/issue
+                                                          {
+                                                            subject: "did:key:z6Mk...",
+                                                            type: "IdentityVerification",
+                                                            claims: {
+                                                              name: "Jane Doe",
+                                                              verified: true,
+                                                              method: "autoident"
+                                                            }
+                                                          }</code></pre>
+
+  <div class="qa">
+    <div class="question">"How would you support reusable identity credentials?"</div>
+    <div class="answer">"After a successful verification, we can optionally issue a verifiable credential using a service like Walt.id. The credential lives in the user's digital wallet — next time they need to verify with any service, they present the credential instead of going through OCR and liveness again. In our architecture, this is just an additional step in the DAG after the decision. If the verdict is APPROVED and the customer has credential issuance enabled, the orchestrator calls the Walt.id API to issue the credential. The engine doesn't change — it's just another step in the workflow definition."</div>
+    <div class="answer-es">"Despues de una verificacion exitosa, opcionalmente podemos emitir una credencial verificable usando Walt.id. La credencial vive en la billetera digital del usuario — la proxima vez presenta la credencial en vez de pasar por OCR y liveness de nuevo. En nuestra arquitectura, es solo un paso adicional en el DAG despues de la decision. El motor no cambia — solo un paso mas en la definicion del workflow."</div>
+  </div>
+
+  <h3>All IDnow Products Summary / Resumen de todos los productos</h3>
+
+  <table>
+    <tr><th>Product</th><th>Method</th><th>How it works</th><th>DAG Steps</th></tr>
+    <tr>
+      <td><strong>AutoIdent</strong></td>
+      <td><code>idnow_autoident</code></td>
+      <td>Fully automated — AI does everything</td>
+      <td>OCR → Liveness → Face Match → Sanctions → Decision</td>
+    </tr>
+    <tr>
+      <td><strong>VideoIdent</strong></td>
+      <td><code>idnow_videoident</code></td>
+      <td>Video call with human agent</td>
+      <td>Video Call → Agent Verification → Decision</td>
+    </tr>
+    <tr>
+      <td><strong>eID</strong></td>
+      <td><code>idnow_eid</code></td>
+      <td>NFC chip read from German ID</td>
+      <td>NFC Read → Chip Data Extract → Sanctions → Decision</td>
+    </tr>
+    <tr>
+      <td><strong>InstantSign</strong></td>
+      <td><code>idnow_instantsign</code></td>
+      <td>Identity verification + electronic signature</td>
+      <td>OCR → Liveness → Face Match → Sanctions → Decision → Sign PDF</td>
+    </tr>
+    <tr>
+      <td><strong>AutoIdent + PoA</strong></td>
+      <td><code>idnow_autoident</code></td>
+      <td>AutoIdent + proof of address document</td>
+      <td>OCR → Liveness → Face Match → Sanctions → Address OCR → Decision</td>
+    </tr>
+  </table>
+
+  <div class="callout warn">
+    <div class="label">Key takeaway for the interview</div>
+    <p>Different products = different DAG definitions. Same engine. The <code>method</code> field in the API tells the Workflow Selector which DAG to use. This is exactly why a generic orchestrator is powerful — you don't write new code for each product, you write a new workflow definition.</p>
+    <p class="es">Diferentes productos = diferentes definiciones de DAG. Mismo motor. El campo <code>method</code> le dice al Workflow Selector que DAG usar. Por eso un orquestador generico es poderoso — no escribes codigo nuevo por producto, escribes una nueva definicion de workflow.</p>
+  </div>
+
   <a href="architecture.html" class="back-top">&larr; Back to Architecture</a>
 
 </div>
